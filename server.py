@@ -85,26 +85,21 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 def root():
     return FileResponse("static/index.html")
 
-
 @app.head("/")
-def root_head():
-    # Render health checks often use HEAD /. FastAPI doesn't always auto-wire HEAD when
-    # returning FileResponse, so we provide an explicit 200 for stability.
+def head_root():
     return Response(status_code=200)
-
 
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
 
-
 @app.head("/healthz")
-def healthz_head():
+def head_healthz():
     return Response(status_code=200)
 
 
-@app.get("/api/leaderboard")
 
+@app.get("/api/leaderboard")
 def api_leaderboard(limit: int = 50):
     limit = max(1, min(int(limit), 100))
     cur = DB.cursor()
@@ -127,6 +122,11 @@ def api_leaderboard(limit: int = 50):
         })
     return {"items": out}
 
+@app.get("/api/config")
+def api_config():
+    return {"roundSeconds": ROUND_SECONDS}
+
+
 # ---------------------------
 # Game rules (Vowely)
 # ---------------------------
@@ -135,9 +135,10 @@ ALLOWED_EXTRA = set("y")
 ALLOWED_NON_CONSONANTS = VOWELS | ALLOWED_EXTRA
 ALL_CONSONANTS = [c for c in "abcdefghijklmnopqrstuvwxyz" if c not in VOWELS and c != "y"]
 WORD_RE = re.compile(r"^[a-z]+$")
-
 ROUND_SECONDS = int(os.getenv("VOWELY_ROUND_SECONDS", "120"))
 print(f"[vowely] ROUND_SECONDS={ROUND_SECONDS}")
+ROUND_SECONDS = 120
+
 MIN_WORD = 3
 MAX_WORD = 24
 
@@ -732,10 +733,12 @@ async def start_match(user1: str, user2: str, *, is_ranked: bool, band: Optional
             hub.user_match[user2] = match_id
             pc2.state = "in_match"
     await hub.send(user1, {"type":"matchFound","matchId":m.match_id,"youAre":"a","opponent":m.b_name,"consonants":sorted(list(m.consonants)),
-                           "endsAt":m.ends_at,"roundSeconds":ROUND_SECONDS,"mode":("ranked" if is_ranked else "casual"),"band":band})
+                           "roundSeconds": ROUND_SECONDS,
+                           "endsAt":m.ends_at,"mode":("ranked" if is_ranked else "casual"),"band":band})
     if not use_bot:
         await hub.send(user2, {"type":"matchFound","matchId":m.match_id,"youAre":"b","opponent":m.a_name,"consonants":sorted(list(m.consonants)),
-                               "endsAt":m.ends_at,"roundSeconds":ROUND_SECONDS,"mode":("ranked" if is_ranked else "casual"),"band":band})
+                           "roundSeconds": ROUND_SECONDS,
+                               "endsAt":m.ends_at,"mode":("ranked" if is_ranked else "casual"),"band":band})
     await hub.broadcast_scores(m)
     asyncio.create_task(end_match_at(m.match_id, m.ends_at))
     if use_bot:
@@ -937,6 +940,7 @@ async def websocket_endpoint(ws: WebSocket):
 
     await ws.send_text(json.dumps({
         "type": "hello",
+        "roundSeconds": ROUND_SECONDS,
         "userId": user_id,
         "pid": user_id,
         "name": pc.name,
@@ -944,7 +948,6 @@ async def websocket_endpoint(ws: WebSocket):
         "rating": profile["rating"],
         "wins": profile["wins"],
         "losses": profile["losses"],
-        "roundSeconds": ROUND_SECONDS,
         # phase 2
         "profile": profile,
         "recent": recent,

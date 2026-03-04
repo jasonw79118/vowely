@@ -297,7 +297,12 @@ function connect() {
       inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      endsAt = msg.endsAt;
+      // Prefer server-provided roundSeconds if available (prevents timer drift)
+      if (typeof msg.roundSeconds === "number" && isFinite(msg.roundSeconds)) {
+        endsAt = Date.now() / 1000 + msg.roundSeconds;
+      } else {
+        endsAt = msg.endsAt;
+      }
       setStatus("IN MATCH");
       setMatchPill("Reconnected " + matchId.slice(0, 8));
       el("opponent").textContent = msg.opponent || "Opponent";
@@ -312,7 +317,12 @@ function connect() {
       inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      endsAt = msg.endsAt;
+      // Prefer server-provided roundSeconds if available (prevents timer drift)
+      if (typeof msg.roundSeconds === "number" && isFinite(msg.roundSeconds)) {
+        endsAt = Date.now() / 1000 + msg.roundSeconds;
+      } else {
+        endsAt = msg.endsAt;
+      }
 
       setStatus("IN MATCH");
       const mMode = msg.mode || playMode;
