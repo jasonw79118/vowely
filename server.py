@@ -82,7 +82,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 def root():
-    return FileResponse("static/ind
+    # Serve the game client
+    return FileResponse("static/index.html")
+
 
 @app.head("/")
 def root_head():
@@ -90,15 +92,15 @@ def root_head():
     # returning FileResponse, so we provide an explicit 200 for stability.
     return Response(status_code=200)
 
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
 
+
 @app.head("/healthz")
 def healthz_head():
     return Response(status_code=200)
-ex.html")
-
 
 @app.get("/api/leaderboard")
 def api_leaderboard(limit: int = 50):
