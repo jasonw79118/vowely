@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, Set, Tuple, List
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocket, WebSocketDisconnect
@@ -82,7 +82,22 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 def root():
-    return FileResponse("static/index.html")
+    return FileResponse("static/ind
+
+@app.head("/")
+def root_head():
+    # Render health checks often use HEAD /. FastAPI doesn't always auto-wire HEAD when
+    # returning FileResponse, so we provide an explicit 200 for stability.
+    return Response(status_code=200)
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
+
+@app.head("/healthz")
+def healthz_head():
+    return Response(status_code=200)
+ex.html")
 
 
 @app.get("/api/leaderboard")
