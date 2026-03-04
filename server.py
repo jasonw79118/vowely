@@ -7,6 +7,7 @@ import re
 import sqlite3
 import time
 import uuid
+import os
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Set, Tuple, List
 from urllib.parse import parse_qs
@@ -135,8 +136,8 @@ ALLOWED_NON_CONSONANTS = VOWELS | ALLOWED_EXTRA
 ALL_CONSONANTS = [c for c in "abcdefghijklmnopqrstuvwxyz" if c not in VOWELS and c != "y"]
 WORD_RE = re.compile(r"^[a-z]+$")
 
-ROUND_SECONDS = 120
-
+ROUND_SECONDS = int(os.getenv("VOWELY_ROUND_SECONDS", "120"))
+print(f"[vowely] ROUND_SECONDS={ROUND_SECONDS}")
 MIN_WORD = 3
 MAX_WORD = 24
 
@@ -731,10 +732,10 @@ async def start_match(user1: str, user2: str, *, is_ranked: bool, band: Optional
             hub.user_match[user2] = match_id
             pc2.state = "in_match"
     await hub.send(user1, {"type":"matchFound","matchId":m.match_id,"youAre":"a","opponent":m.b_name,"consonants":sorted(list(m.consonants)),
-                           "endsAt":m.ends_at,"mode":("ranked" if is_ranked else "casual"),"band":band})
+                           "endsAt":m.ends_at,"roundSeconds":ROUND_SECONDS,"mode":("ranked" if is_ranked else "casual"),"band":band})
     if not use_bot:
         await hub.send(user2, {"type":"matchFound","matchId":m.match_id,"youAre":"b","opponent":m.a_name,"consonants":sorted(list(m.consonants)),
-                               "endsAt":m.ends_at,"mode":("ranked" if is_ranked else "casual"),"band":band})
+                               "endsAt":m.ends_at,"roundSeconds":ROUND_SECONDS,"mode":("ranked" if is_ranked else "casual"),"band":band})
     await hub.broadcast_scores(m)
     asyncio.create_task(end_match_at(m.match_id, m.ends_at))
     if use_bot:
@@ -943,6 +944,7 @@ async def websocket_endpoint(ws: WebSocket):
         "rating": profile["rating"],
         "wins": profile["wins"],
         "losses": profile["losses"],
+        "roundSeconds": ROUND_SECONDS,
         # phase 2
         "profile": profile,
         "recent": recent,
@@ -960,6 +962,7 @@ async def websocket_endpoint(ws: WebSocket):
             "opponent": opp,
             "consonants": sorted(list(m_active.consonants)),
             "endsAt": m_active.ends_at,
+            "roundSeconds": ROUND_SECONDS,
             "mode": "ranked" if bool(getattr(m_active, "is_ranked", True)) else "casual",
         })
         await hub.send(user_id, {
