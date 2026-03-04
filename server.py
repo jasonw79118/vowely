@@ -473,12 +473,12 @@ async def enqueue(self, user_id: str, *, is_ranked: bool) -> None:
                 self.casual_wait = [(u,t) for (u,t) in self.casual_wait if u != user_id]
                 self.casual_wait.append((user_id, now))
 
-    async def cancel_search(self, user_id: str) -> None:
+async def cancel_search(self, user_id: str) -> None:
         async with self.queue_lock:
             self.ranked_wait = [(u,t) for (u,t) in self.ranked_wait if u != user_id]
             self.casual_wait = [(u,t) for (u,t) in self.casual_wait if u != user_id]
 
-    async def pop_ranked_match(self) -> Optional[Tuple[str, str, int]]:
+async def pop_ranked_match(self) -> Optional[Tuple[str, str, int]]:
         async with self.queue_lock:
             self.ranked_wait = [(u,t) for (u,t) in self.ranked_wait if (u in self.clients and self.clients[u].state == "searching")]
             if len(self.ranked_wait) < 2:
@@ -502,7 +502,7 @@ async def enqueue(self, user_id: str, *, is_ranked: bool) -> None:
                         return (u1, u2, band)
             return None
 
-    async def pop_casual_opponent(self, user1: str) -> Optional[str]:
+async def pop_casual_opponent(self, user1: str) -> Optional[str]:
         async with self.queue_lock:
             self.casual_wait = [(u,t) for (u,t) in self.casual_wait if (u in self.clients and self.clients[u].state == "searching")]
             for (u,_t) in list(self.casual_wait):
