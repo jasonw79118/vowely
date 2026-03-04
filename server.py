@@ -258,6 +258,26 @@ def update_user_name(user_id: str, new_name: str) -> None:
     DB.execute("UPDATE users SET name = ? WHERE user_id = ?", (new_name, user_id))
     DB.commit()
 
+# Lightweight display-name validation (no heavy profanity list yet).
+# Keep this conservative to avoid crashes; you can tighten later.
+_NAME_ALLOWED_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _\-]{0,15}$")
+
+def is_name_allowed(name: str) -> bool:
+    if not name:
+        return False
+    n = name.strip()
+    if len(n) < 2 or len(n) > 16:
+        return False
+    # Block obvious reserved names
+    if n.lower() in {"admin", "moderator", "mod", "support", "system"}:
+        return False
+    if not _NAME_ALLOWED_RE.match(n):
+        return False
+    # Collapse multiple spaces to discourage weird formatting
+    if "  " in n:
+        return False
+    return True
+
 
 def get_user(user_id: str) -> Optional[sqlite3.Row]:
     cur = DB.cursor()
