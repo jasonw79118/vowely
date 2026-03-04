@@ -36,6 +36,29 @@ def tier_for_rating(rating: int) -> str:
     return "Master"
 
 
+
+# ---------------------------
+# Lightweight name validation
+# ---------------------------
+_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 _\-]{1,18}$")
+_BANNED_SUBSTRINGS = {
+    "admin", "moderator", "mod", "support", "staff", "system",
+    "fuck", "shit", "bitch", "cunt", "nigger", "faggot", "rape",
+}
+
+def is_name_allowed(name: str) -> bool:
+    """Very small guardrail: allow simple display names and block obvious impersonation/profanity."""
+    if not name:
+        return False
+    n = name.strip()
+    if not _NAME_RE.match(n):
+        return False
+    low = n.lower()
+    for bad in _BANNED_SUBSTRINGS:
+        if bad in low:
+            return False
+    return True
+
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -405,6 +428,7 @@ class PlayerConn:
     disconnected_at: float = 0.0
     grace_task: Optional[asyncio.Task] = None
     last_submit_at: float = 0.0
+    heartbeat_task: Optional[asyncio.Task] = None
 
 
 @dataclass
@@ -445,6 +469,19 @@ class Hub:
         self.user_match: Dict[str, str] = {}
         self._match_lock = asyncio.Lock()
 
+
+    async def _heartbeat(self, user_id: str) -> None:
+        """Periodic keepalive messages so hosted proxies don't drop idle websockets."""
+        while True:
+            await asyncio.sleep(20)
+            pc = self.clients.get(user_id)
+            if not pc:
+                return
+            try:
+                await pc.ws.send_text(json.dumps({"type": "hb", "t": time.time()}))
+            except Exception:
+                return
+
     async def send(self, user_id: str, msg: dict) -> None:
         pc = self.clients.get(user_id)
         if not pc:
@@ -480,54 +517,82 @@ class Hub:
             return m.a_words, "a"
         return m.b_words, "b"
 
-
-async def enqueue(self, user_id: str, *, is_ranked: bool) -> None:
+    # ---------------------------
+    # Matchmaking queues (ranked/casual)
+    # ---------------------------
+    async def enqueue(self, user_id: str, *, is_ranked: bool) -> None:
+        """Put a connected player into ranked/casual search, replacing any prior entry."""
         async with self.queue_lock:
             now = time.time()
             if is_ranked:
-                self.ranked_wait = [(u,t) for (u,t) in self.ranked_wait if u != user_id]
+                self.ranked_wait = [(u, t) for (u, t) in self.ranked_wait if u != user_id]
                 self.ranked_wait.append((user_id, now))
             else:
-                self.casual_wait = [(u,t) for (u,t) in self.casual_wait if u != user_id]
+                self.casual_wait = [(u, t) for (u, t) in self.casual_wait if u != user_id]
                 self.casual_wait.append((user_id, now))
 
-async def cancel_search(self, user_id: str) -> None:
+    async def cancel_search(self, user_id: str) -> None:
+        """Remove player from any matchmaking queue."""
         async with self.queue_lock:
-            self.ranked_wait = [(u,t) for (u,t) in self.ranked_wait if u != user_id]
-            self.casual_wait = [(u,t) for (u,t) in self.casual_wait if u != user_id]
+            self.ranked_wait = [(u, t) for (u, t) in self.ranked_wait if u != user_id]
+            self.casual_wait = [(u, t) for (u, t) in self.casual_wait if u != user_id]
 
-async def pop_ranked_match(self) -> Optional[Tuple[str, str, int]]:
+    async def pop_ranked_match(self) -> Optional[Tuple[str, str, int]]:
+        """Try to form a ranked match. Returns (u1, u2, band_used) or None."""
         async with self.queue_lock:
-            self.ranked_wait = [(u,t) for (u,t) in self.ranked_wait if (u in self.clients and self.clients[u].state == "searching")]
+            # Keep only still-connected + actively searching users
+            self.ranked_wait = [
+                (u, t) for (u, t) in self.ranked_wait
+                if (u in self.clients and self.clients[u].state == "searching")
+            ]
             if len(self.ranked_wait) < 2:
                 return None
+
             def rating_of(u: str) -> int:
                 row = get_user(u)
                 return int(row["rating"]) if row else 1200
+
+            # Sort by rating to efficiently pick close opponents
             self.ranked_wait.sort(key=lambda ut: rating_of(ut[0]))
+
+            now = time.time()
             for i in range(len(self.ranked_wait) - 1):
                 u1, t1 = self.ranked_wait[i]
                 r1 = rating_of(u1)
-                waited = max(0.0, time.time() - t1)
-                band = min(RANKED_SEARCH_MAX_BAND, RANKED_SEARCH_BASE_BAND + int(waited // RANKED_SEARCH_STEP_SECONDS) * RANKED_SEARCH_STEP_BAND)
+
+                waited = max(0.0, now - t1)
+                band = min(
+                    RANKED_SEARCH_MAX_BAND,
+                    RANKED_SEARCH_BASE_BAND + int(waited // RANKED_SEARCH_STEP_SECONDS) * RANKED_SEARCH_STEP_BAND
+                )
+
                 for j in range(i + 1, len(self.ranked_wait)):
                     u2, _t2 = self.ranked_wait[j]
                     r2 = rating_of(u2)
                     if r2 - r1 > band:
                         break
                     if u1 != u2:
-                        self.ranked_wait = [(u,t) for (u,t) in self.ranked_wait if u not in {u1,u2}]
+                        # Remove both and return
+                        self.ranked_wait = [(u, t) for (u, t) in self.ranked_wait if u not in {u1, u2}]
                         return (u1, u2, band)
+
             return None
 
-async def pop_casual_opponent(self, user1: str) -> Optional[str]:
+    async def pop_casual_opponent(self, user1: str) -> Optional[str]:
+        """Find any other casual-searching opponent (FIFO-ish)."""
         async with self.queue_lock:
-            self.casual_wait = [(u,t) for (u,t) in self.casual_wait if (u in self.clients and self.clients[u].state == "searching")]
-            for (u,_t) in list(self.casual_wait):
+            self.casual_wait = [
+                (u, t) for (u, t) in self.casual_wait
+                if (u in self.clients and self.clients[u].state == "searching")
+            ]
+            for (u, _t) in list(self.casual_wait):
                 if u != user1:
-                    self.casual_wait = [(x,tx) for (x,tx) in self.casual_wait if x != u]
+                    self.casual_wait = [(x, tx) for (x, tx) in self.casual_wait if x != u]
                     return u
             return None
+
+
+
 
 hub = Hub()
 
@@ -824,6 +889,10 @@ async def websocket_endpoint(ws: WebSocket):
     else:
         pc = PlayerConn(ws=ws, user_id=user_id, name=user["name"])
         hub.clients[user_id] = pc
+    # keepalive heartbeat for hosted websockets
+    if pc.heartbeat_task and not pc.heartbeat_task.done():
+        pc.heartbeat_task.cancel()
+    pc.heartbeat_task = asyncio.create_task(hub._heartbeat(user_id))
     hub.ws_to_user[id(ws)] = user_id
 
     profile = {
@@ -988,6 +1057,8 @@ async def websocket_endpoint(ws: WebSocket):
         uid = hub.ws_to_user.pop(id(ws), None)
         if uid:
             pcx = hub.clients.get(uid)
+            if pcx and pcx.heartbeat_task and not pcx.heartbeat_task.done():
+                pcx.heartbeat_task.cancel()
             mid = hub.user_match.get(uid)
             if pcx and mid and pcx.state == "in_match":
                 pcx.disconnected_at = time.time()

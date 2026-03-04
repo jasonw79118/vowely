@@ -7,6 +7,21 @@ function getPlayerId() {
   return pid;
 }
 
+
+function getApiBase() {
+  // If the UI is hosted on GitHub Pages, talk to the Render backend.
+  if (location.hostname.endsWith("github.io")) return "https://vowely.onrender.com";
+  return "";
+}
+
+function getWsBase() {
+  // Use wss on https to avoid mixed-content blocks.
+  const proto = (location.protocol === "https:") ? "wss" : "ws";
+  // If hosted on GitHub Pages, point to the backend host.
+  if (location.hostname.endsWith("github.io")) return `${proto}://vowely.onrender.com`;
+  return `${proto}://${location.host}`;
+}
+
 let ws;
 let endsAt = 0;
 let inMatch = false;
@@ -14,7 +29,6 @@ let matchId = null;
 let youAre = null;
 let playMode = "casual";
 let leaderboardTimer = null;
-let socketReady = false;
 
 const el = (id) => document.getElementById(id);
 
@@ -211,7 +225,7 @@ function resetUIForIdle() {
   el("mywords").innerHTML = "";
   setMatchPill(null);
 
-    el("play").disabled = !socketReady;
+  el("play").disabled = false;
   el("cancel").disabled = true;
 }
 
@@ -220,26 +234,16 @@ function connect() {
   const proto = (location.protocol === "https:") ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws?pid=${pid}`);
 
-  socketReady = false;
-  if (el("play")) el("play").disabled = true;
-
   ws.onopen = () => {
-    socketReady = true;
     setStatus("CONNECTED");
     logFeed("Connected.");
-    // enable Play if not currently searching/in match
-    if (!inMatch && el("cancel") && el("cancel").disabled) {
-      el("play").disabled = false;
-    }
     refreshLeaderboard();
   };
 
   ws.onclose = () => {
-    socketReady = false;
     setStatus("DISCONNECTED");
     logFeed("Disconnected.");
     resetUIForIdle();
-    if (el("play")) el("play").disabled = true;
   };
 
   ws.onmessage = (ev) => {
@@ -388,15 +392,7 @@ function connect() {
 }
 
 el("setName").onclick = () => send("setName", { name: el("name").value });
-function tryPlay() {
-  if (!socketReady) {
-    logFeed("Connecting… please wait.");
-    return;
-  }
-  send("play", { mode: playMode });
-}
-
-el("play").onclick = () => tryPlay();
+el("play").onclick = () => send("play", { mode: playMode });
 el("cancel").onclick = () => send("cancelSearch");
 
 el("submit").onclick = () => {
@@ -424,10 +420,8 @@ window.addEventListener("DOMContentLoaded", () => {
     playMode = (modeSel.value || "casual");
     modeSel.addEventListener("change", () => { playMode = (modeSel.value || "casual"); });
   }
-  // Disable Play until WebSocket is ready (prevents silent drop on slow connections)
-  if (el("play")) el("play").disabled = !socketReady;
   const againBtn = el("playAgain");
-  if (againBtn) againBtn.addEventListener("click", () => tryPlay());
+  if (againBtn) againBtn.addEventListener("click", () => send("play", { mode: playMode }));
   const refreshBtn = el("refreshLeaderboard");
   if (refreshBtn) refreshBtn.addEventListener("click", refreshLeaderboard);
   if (!leaderboardTimer) leaderboardTimer = setInterval(refreshLeaderboard, 15000);
