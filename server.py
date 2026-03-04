@@ -17,6 +17,24 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 
 from wordfreq import zipf_frequency
+def tier_for_rating(rating: int) -> str:
+    """Return a tier label for a given Elo rating."""
+    try:
+        r = int(rating)
+    except Exception:
+        r = 1200
+    if r < 1000:
+        return "Bronze"
+    if r < 1200:
+        return "Silver"
+    if r < 1400:
+        return "Gold"
+    if r < 1600:
+        return "Platinum"
+    if r < 1800:
+        return "Diamond"
+    return "Master"
+
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
