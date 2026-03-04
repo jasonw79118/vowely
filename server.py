@@ -82,7 +82,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 def root():
-    # Serve the game client
     return FileResponse("static/index.html")
 
 
@@ -102,7 +101,9 @@ def healthz():
 def healthz_head():
     return Response(status_code=200)
 
+
 @app.get("/api/leaderboard")
+
 def api_leaderboard(limit: int = 50):
     limit = max(1, min(int(limit), 100))
     cur = DB.cursor()
