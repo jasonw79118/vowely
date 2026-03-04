@@ -17,6 +17,46 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 
 from wordfreq import zipf_frequency
+# ---------------------------
+# Deploy-safe defaults
+# ---------------------------
+# These constants are referenced in runtime paths. Define them unconditionally so
+# production deploys don't crash if earlier refactors moved/removed definitions.
+try:
+    DISCONNECT_GRACE_SECONDS
+except NameError:
+    DISCONNECT_GRACE_SECONDS = 15
+
+try:
+    SUBMIT_RATE_LIMIT_SECONDS
+except NameError:
+    SUBMIT_RATE_LIMIT_SECONDS = 0.35
+
+try:
+    RANKED_SEARCH_BASE_BAND
+except NameError:
+    RANKED_SEARCH_BASE_BAND = 100
+
+try:
+    RANKED_SEARCH_MAX_BAND
+except NameError:
+    RANKED_SEARCH_MAX_BAND = 600
+
+try:
+    RANKED_SEARCH_STEP_SECONDS
+except NameError:
+    RANKED_SEARCH_STEP_SECONDS = 2.5
+
+try:
+    RANKED_SEARCH_STEP_BAND
+except NameError:
+    RANKED_SEARCH_STEP_BAND = 50
+
+try:
+    RANKED_NO_BOT_TIMEOUT
+except NameError:
+    RANKED_NO_BOT_TIMEOUT = 10
+
 def tier_for_rating(rating: int) -> str:
     """Return a tier label for a given Elo rating."""
     try:
@@ -35,17 +75,6 @@ def tier_for_rating(rating: int) -> str:
         return "Diamond"
     return "Master"
 
-
-# ---------------------------
-# Matchmaking / safety defaults (Render deploy-safe)
-# ---------------------------
-DISCONNECT_GRACE_SECONDS = 15
-SUBMIT_RATE_LIMIT_SECONDS = 0.35
-RANKED_SEARCH_BASE_BAND = 100
-RANKED_SEARCH_MAX_BAND = 600
-RANKED_SEARCH_STEP_SECONDS = 2.5
-RANKED_SEARCH_STEP_BAND = 50
-RANKED_NO_BOT_TIMEOUT = 10
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
