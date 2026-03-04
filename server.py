@@ -36,28 +36,16 @@ def tier_for_rating(rating: int) -> str:
     return "Master"
 
 
-
 # ---------------------------
-# Lightweight name validation
+# Matchmaking / safety defaults (Render deploy-safe)
 # ---------------------------
-_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 _\-]{1,18}$")
-_BANNED_SUBSTRINGS = {
-    "admin", "moderator", "mod", "support", "staff", "system",
-    "fuck", "shit", "bitch", "cunt", "nigger", "faggot", "rape",
-}
-
-def is_name_allowed(name: str) -> bool:
-    """Very small guardrail: allow simple display names and block obvious impersonation/profanity."""
-    if not name:
-        return False
-    n = name.strip()
-    if not _NAME_RE.match(n):
-        return False
-    low = n.lower()
-    for bad in _BANNED_SUBSTRINGS:
-        if bad in low:
-            return False
-    return True
+DISCONNECT_GRACE_SECONDS = 15
+SUBMIT_RATE_LIMIT_SECONDS = 0.35
+RANKED_SEARCH_BASE_BAND = 100
+RANKED_SEARCH_MAX_BAND = 600
+RANKED_SEARCH_STEP_SECONDS = 2.5
+RANKED_SEARCH_STEP_BAND = 50
+RANKED_NO_BOT_TIMEOUT = 10
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -517,82 +505,54 @@ class Hub:
             return m.a_words, "a"
         return m.b_words, "b"
 
-    # ---------------------------
-    # Matchmaking queues (ranked/casual)
-    # ---------------------------
-    async def enqueue(self, user_id: str, *, is_ranked: bool) -> None:
-        """Put a connected player into ranked/casual search, replacing any prior entry."""
+
+async def enqueue(self, user_id: str, *, is_ranked: bool) -> None:
         async with self.queue_lock:
             now = time.time()
             if is_ranked:
-                self.ranked_wait = [(u, t) for (u, t) in self.ranked_wait if u != user_id]
+                self.ranked_wait = [(u,t) for (u,t) in self.ranked_wait if u != user_id]
                 self.ranked_wait.append((user_id, now))
             else:
-                self.casual_wait = [(u, t) for (u, t) in self.casual_wait if u != user_id]
+                self.casual_wait = [(u,t) for (u,t) in self.casual_wait if u != user_id]
                 self.casual_wait.append((user_id, now))
 
-    async def cancel_search(self, user_id: str) -> None:
-        """Remove player from any matchmaking queue."""
+async def cancel_search(self, user_id: str) -> None:
         async with self.queue_lock:
-            self.ranked_wait = [(u, t) for (u, t) in self.ranked_wait if u != user_id]
-            self.casual_wait = [(u, t) for (u, t) in self.casual_wait if u != user_id]
+            self.ranked_wait = [(u,t) for (u,t) in self.ranked_wait if u != user_id]
+            self.casual_wait = [(u,t) for (u,t) in self.casual_wait if u != user_id]
 
-    async def pop_ranked_match(self) -> Optional[Tuple[str, str, int]]:
-        """Try to form a ranked match. Returns (u1, u2, band_used) or None."""
+async def pop_ranked_match(self) -> Optional[Tuple[str, str, int]]:
         async with self.queue_lock:
-            # Keep only still-connected + actively searching users
-            self.ranked_wait = [
-                (u, t) for (u, t) in self.ranked_wait
-                if (u in self.clients and self.clients[u].state == "searching")
-            ]
+            self.ranked_wait = [(u,t) for (u,t) in self.ranked_wait if (u in self.clients and self.clients[u].state == "searching")]
             if len(self.ranked_wait) < 2:
                 return None
-
             def rating_of(u: str) -> int:
                 row = get_user(u)
                 return int(row["rating"]) if row else 1200
-
-            # Sort by rating to efficiently pick close opponents
             self.ranked_wait.sort(key=lambda ut: rating_of(ut[0]))
-
-            now = time.time()
             for i in range(len(self.ranked_wait) - 1):
                 u1, t1 = self.ranked_wait[i]
                 r1 = rating_of(u1)
-
-                waited = max(0.0, now - t1)
-                band = min(
-                    RANKED_SEARCH_MAX_BAND,
-                    RANKED_SEARCH_BASE_BAND + int(waited // RANKED_SEARCH_STEP_SECONDS) * RANKED_SEARCH_STEP_BAND
-                )
-
+                waited = max(0.0, time.time() - t1)
+                band = min(RANKED_SEARCH_MAX_BAND, RANKED_SEARCH_BASE_BAND + int(waited // RANKED_SEARCH_STEP_SECONDS) * RANKED_SEARCH_STEP_BAND)
                 for j in range(i + 1, len(self.ranked_wait)):
                     u2, _t2 = self.ranked_wait[j]
                     r2 = rating_of(u2)
                     if r2 - r1 > band:
                         break
                     if u1 != u2:
-                        # Remove both and return
-                        self.ranked_wait = [(u, t) for (u, t) in self.ranked_wait if u not in {u1, u2}]
+                        self.ranked_wait = [(u,t) for (u,t) in self.ranked_wait if u not in {u1,u2}]
                         return (u1, u2, band)
-
             return None
 
-    async def pop_casual_opponent(self, user1: str) -> Optional[str]:
-        """Find any other casual-searching opponent (FIFO-ish)."""
+async def pop_casual_opponent(self, user1: str) -> Optional[str]:
         async with self.queue_lock:
-            self.casual_wait = [
-                (u, t) for (u, t) in self.casual_wait
-                if (u in self.clients and self.clients[u].state == "searching")
-            ]
-            for (u, _t) in list(self.casual_wait):
+            self.casual_wait = [(u,t) for (u,t) in self.casual_wait if (u in self.clients and self.clients[u].state == "searching")]
+            for (u,_t) in list(self.casual_wait):
                 if u != user1:
-                    self.casual_wait = [(x, tx) for (x, tx) in self.casual_wait if x != u]
+                    self.casual_wait = [(x,tx) for (x,tx) in self.casual_wait if x != u]
                     return u
             return None
-
-
-
 
 hub = Hub()
 
