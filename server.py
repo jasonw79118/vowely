@@ -6,13 +6,13 @@ import random
 import re
 import sqlite3
 import time
+import os
 import uuid
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Set, Tuple, List
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocket, WebSocketDisconnect
@@ -78,22 +78,6 @@ def tier_for_rating(rating: int) -> str:
 
 
 app = FastAPI()
-
-# CORS: allow GitHub Pages frontend + local dev to call this API
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://jasonw79118.github.io",
-        "http://localhost",
-        "http://127.0.0.1",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -134,8 +118,8 @@ ALLOWED_NON_CONSONANTS = VOWELS | ALLOWED_EXTRA
 ALL_CONSONANTS = [c for c in "abcdefghijklmnopqrstuvwxyz" if c not in VOWELS and c != "y"]
 WORD_RE = re.compile(r"^[a-z]+$")
 
-ROUND_SECONDS = 120
-
+ROUND_SECONDS = int(os.getenv("VOWELY_ROUND_SECONDS", "120"))  # default 2 minutes
+print(f"[vowely] ROUND_SECONDS={ROUND_SECONDS}")
 MIN_WORD = 3
 MAX_WORD = 24
 
@@ -730,10 +714,10 @@ async def start_match(user1: str, user2: str, *, is_ranked: bool, band: Optional
             hub.user_match[user2] = match_id
             pc2.state = "in_match"
     await hub.send(user1, {"type":"matchFound","matchId":m.match_id,"youAre":"a","opponent":m.b_name,"consonants":sorted(list(m.consonants)),
-                           "endsAt":m.ends_at,"mode":("ranked" if is_ranked else "casual"),"band":band})
+                           "endsAt":m.ends_at, "roundSeconds":ROUND_SECONDS,"mode":("ranked" if is_ranked else "casual"),"band":band})
     if not use_bot:
         await hub.send(user2, {"type":"matchFound","matchId":m.match_id,"youAre":"b","opponent":m.a_name,"consonants":sorted(list(m.consonants)),
-                               "endsAt":m.ends_at,"mode":("ranked" if is_ranked else "casual"),"band":band})
+                               "endsAt":m.ends_at, "roundSeconds":ROUND_SECONDS,"mode":("ranked" if is_ranked else "casual"),"band":band})
     await hub.broadcast_scores(m)
     asyncio.create_task(end_match_at(m.match_id, m.ends_at))
     if use_bot:
@@ -877,6 +861,10 @@ async def end_match_at(match_id: str, ends_at: float):
     hub.matches.pop(match_id, None)
 
 
+
+@app.get("/api/config")
+async def api_config():
+    return {"roundSeconds": ROUND_SECONDS}
 @app.on_event("startup")
 async def startup():
     db_init()
