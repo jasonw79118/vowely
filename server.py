@@ -114,9 +114,11 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 def root():
-    return FileResponse("static/ind
+    # Serve the UI when running backend directly (Render/local).
+    return FileResponse("static/index.html")
 
 @app.head("/")
+
 def root_head():
     # Render health checks often use HEAD /. FastAPI doesn't always auto-wire HEAD when
     # returning FileResponse, so we provide an explicit 200 for stability.
@@ -131,6 +133,10 @@ def healthz_head():
     return Response(status_code=200)
 ex.html")
 
+
+@app.get("/api/config")
+def api_config():
+    return {"roundSeconds": int(ROUND_SECONDS)}
 
 @app.get("/api/leaderboard")
 def api_leaderboard(limit: int = 50):

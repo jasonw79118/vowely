@@ -22,6 +22,7 @@ function getWsBase() {
   return `${proto}://${location.host}`;
 }
 
+let roundSeconds = 120;
 let ws;
 let endsAt = 0;
 let inMatch = false;
@@ -141,7 +142,7 @@ async function refreshLeaderboard() {
   const box = el("leaderboardList");
   if (!box) return;
   try {
-    const res = await fetch(`/api/leaderboard?limit=25`, { cache: "no-store" });
+    const res = await fetch(`${getApiBase()}/api/leaderboard?limit=25`, { cache: "no-store" });
     const data = await res.json();
     const items = (data && data.items) ? data.items : [];
     box.innerHTML = "";
@@ -315,7 +316,7 @@ function connect() {
       inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      endsAt = (Date.now() / 1000) + Number(roundSeconds || 120);
+      endsAt = (msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + Number(roundSeconds || 120)));
       // (server also sends msg.endsAt; we prefer local countdown to avoid 4:00 display drift)
       setStatus("IN MATCH");
       setMatchPill("Reconnected " + matchId.slice(0, 8));
@@ -331,7 +332,7 @@ function connect() {
       inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      endsAt = (Date.now() / 1000) + Number(roundSeconds || 120);
+      endsAt = (msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + Number(roundSeconds || 120)));
 
       setStatus("IN MATCH");
       const mMode = msg.mode || playMode;
@@ -402,8 +403,9 @@ function connect() {
       const reason = msg.endedReason ? ` (${msg.endedReason})` : "";
       logFeed(`Match ended. ${result}${reason}`);
 
-      // show status and enable play again
+      // Fully reset match state so Play works without refresh
       setStatus("READY");
+      resetUIForIdle();
       el("play").disabled = false;
       setMatchPill(null);
       return;
