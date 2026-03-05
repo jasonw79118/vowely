@@ -22,9 +22,6 @@ function getWsBase() {
   return `${proto}://${location.host}`;
 }
 
-// Debug: show which backend we are using
-console.log("[vowely] apiBase:", getApiBase(), "wsBase:", getWsBase());
-
 let ws;
 let endsAt = 0;
 let inMatch = false;
@@ -144,7 +141,7 @@ async function refreshLeaderboard() {
   const box = el("leaderboardList");
   if (!box) return;
   try {
-    const res = await fetch(`${getApiBase()}/api/leaderboard?limit=25`, { cache: "no-store" });
+    const res = await fetch(`/api/leaderboard?limit=25`, { cache: "no-store" });
     const data = await res.json();
     const items = (data && data.items) ? data.items : [];
     box.innerHTML = "";
@@ -198,6 +195,24 @@ function setMatchPill(text) {
     pill.textContent = text;
   }
 }
+
+
+async function syncConfig() {
+  try {
+    const r = await fetch(`${getApiBase()}/api/config`, { cache: "no-store" });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j && typeof j.roundSeconds === "number" && j.roundSeconds > 0) {
+      roundSeconds = j.roundSeconds;
+    }
+    console.log("[vowely] config roundSeconds:", roundSeconds);
+  } catch (e) {
+    // keep default
+  }
+}
+
+// fetch config early
+syncConfig();
 
 function tick() {
   if (!endsAt) {
@@ -300,7 +315,8 @@ function connect() {
       inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      endsAt = msg.endsAt;
+      endsAt = (Date.now() / 1000) + Number(roundSeconds || 120);
+      // (server also sends msg.endsAt; we prefer local countdown to avoid 4:00 display drift)
       setStatus("IN MATCH");
       setMatchPill("Reconnected " + matchId.slice(0, 8));
       el("opponent").textContent = msg.opponent || "Opponent";
@@ -315,7 +331,7 @@ function connect() {
       inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      endsAt = msg.endsAt;
+      endsAt = (Date.now() / 1000) + Number(roundSeconds || 120);
 
       setStatus("IN MATCH");
       const mMode = msg.mode || playMode;
@@ -379,6 +395,7 @@ function connect() {
     }
 
     if (msg.type === "matchEnd") {
+      // Reset match state so Play works without refresh
       const a = msg.a, b = msg.b;
       let result = "Tie!";
       if (msg.winner) result = `Winner: ${msg.winner}`;
