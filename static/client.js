@@ -29,6 +29,7 @@ let matchId = null;
 let youAre = null;
 let playMode = "casual";
 let leaderboardTimer = null;
+let roundOverShown = false;
 
 const el = (id) => document.getElementById(id);
 
@@ -205,6 +206,18 @@ function tick() {
   const mm = String(Math.floor(left / 60)).padStart(2, "0");
   const ss = String(left % 60).padStart(2, "0");
   el("timer").textContent = `${mm}:${ss}`;
+
+  // Client-side confirmation when the clock hits 00:00.
+  // The server is authoritative and will send matchEnd/result, but this avoids the "did it end?" feeling.
+  if (inMatch && left === 0 && !roundOverShown) {
+    roundOverShown = true;
+    el("feedback").textContent = "⏱️ Time! Round over — calculating results…";
+    logFeed("Time is up — waiting for match results…");
+    const wordEl = el("word");
+    const submitEl = el("submit");
+    if (wordEl) wordEl.disabled = true;
+    if (submitEl) submitEl.disabled = true;
+  }
 }
 setInterval(tick, 200);
 
@@ -218,6 +231,7 @@ function resetUIForIdle() {
   matchId = null;
   youAre = null;
   endsAt = 0;
+  roundOverShown = false;
 
   el("opponent").textContent = "—";
   el("cons").textContent = "—";
@@ -297,12 +311,13 @@ function connect() {
       inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      // Prefer server-provided roundSeconds if available (prevents timer drift)
-      if (typeof msg.roundSeconds === "number" && isFinite(msg.roundSeconds)) {
-        endsAt = Date.now() / 1000 + msg.roundSeconds;
-      } else {
-        endsAt = msg.endsAt;
-      }
+      endsAt = msg.endsAt;
+      roundOverShown = false;
+      const wordEl = el("word");
+      const submitEl = el("submit");
+      if (wordEl) wordEl.disabled = false;
+      if (submitEl) submitEl.disabled = false;
+
       setStatus("IN MATCH");
       setMatchPill("Reconnected " + matchId.slice(0, 8));
       el("opponent").textContent = msg.opponent || "Opponent";
@@ -310,6 +325,7 @@ function connect() {
       logFeed("Reconnected to match.");
       el("cancel").disabled = true;
       el("play").disabled = true;
+
       return;
     }
 
@@ -317,12 +333,13 @@ function connect() {
       inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      // Prefer server-provided roundSeconds if available (prevents timer drift)
-      if (typeof msg.roundSeconds === "number" && isFinite(msg.roundSeconds)) {
-        endsAt = Date.now() / 1000 + msg.roundSeconds;
-      } else {
-        endsAt = msg.endsAt;
-      }
+      endsAt = msg.endsAt;
+
+      roundOverShown = false;
+      const wordEl = el("word");
+      const submitEl = el("submit");
+      if (wordEl) wordEl.disabled = false;
+      if (submitEl) submitEl.disabled = false;
 
       setStatus("IN MATCH");
       const mMode = msg.mode || playMode;
@@ -345,6 +362,7 @@ function connect() {
         el("aName").textContent = msg.opponent || "Opponent";
         el("bName").textContent = el("name").value || "You";
       }
+
       return;
     }
 
@@ -392,10 +410,19 @@ function connect() {
       const reason = msg.endedReason ? ` (${msg.endedReason})` : "";
       logFeed(`Match ended. ${result}${reason}`);
 
+      // Visual confirmation in the UI
+      el("feedback").textContent = `✅ Round over. ${result}${reason}`;
+
       // show status and enable play again
       setStatus("READY");
+      const wordEl = el("word");
+      const submitEl = el("submit");
+      if (wordEl) wordEl.disabled = true;
+      if (submitEl) submitEl.disabled = true;
+
       el("play").disabled = false;
       setMatchPill(null);
+
       return;
     }
   };
