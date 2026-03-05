@@ -1,3 +1,15 @@
+
+// Ensure setDebug exists globally even if bundled/scoped.
+if (typeof setDebug !== "function") {
+  window.setDebug = function (msg) {
+    try {
+      const d = document.getElementById("debug");
+      if (!d) return;
+      d.textContent = String(msg);
+    } catch (_) {}
+  };
+}
+
 function getPlayerId() {
   let pid = localStorage.getItem("vowely_player_id");
   if (!pid) {
@@ -32,6 +44,13 @@ let playMode = "casual";
 let leaderboardTimer = null;
 
 const el = (id) => document.getElementById(id);
+
+function setDebug(msg) {
+  const d = el("debug");
+  if (!d) return;
+  d.textContent = msg;
+}
+
 
 
 function setText(id, txt) {
@@ -207,8 +226,11 @@ async function syncConfig() {
       roundSeconds = j.roundSeconds;
     }
     console.log("[vowely] config roundSeconds:", roundSeconds);
-  } catch (e) {
+  
+    (typeof setDebug === "function" ? setDebug(`config.roundSeconds=${roundSeconds}`) : void 0);
+} catch (e) {
     // keep default
+    setDebug(`config.roundSeconds=${roundSeconds} (config fetch failed)`);
   }
 }
 
@@ -316,14 +338,23 @@ function connect() {
       inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      if (msg.roundSeconds) roundSeconds = Number(msg.roundSeconds);
-      endsAt = msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + Number(roundSeconds || 120));
+      endsAt = (msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + Number(roundSeconds || 120)));
+      
+      // Clamp UI countdown to roundSeconds in case a stale/incorrect endsAt comes in.
+      // This prevents "starts at 4:00" when the authoritative match length is 2:00.
+      const nowSec = Date.now() / 1000;
+      const uiLeft = Math.round(endsAt - nowSec);
+      if (uiLeft > (Number(roundSeconds || 120) + 2)) {
+        endsAt = nowSec + Number(roundSeconds || 120);
+      }
       tick();
+      const dur = Math.round(endsAt - (Date.now() / 1000));
+      (typeof setDebug === "function" ? setDebug(`config.roundSeconds=${roundSeconds} | matchFound.secondsLeft≈${dur}`) : void 0);
+// (server also sends msg.endsAt; we prefer local countdown to avoid 4:00 display drift)
       setStatus("IN MATCH");
       setMatchPill("Reconnected " + matchId.slice(0, 8));
       el("opponent").textContent = msg.opponent || "Opponent";
       el("cons").textContent = (msg.consonants || []).join(" ").toUpperCase();
-      setDebug(`config.roundSeconds=${roundSeconds} | reconnected.secondsLeft≈${Math.round(endsAt - (Date.now() / 1000))}`);
       logFeed("Reconnected to match.");
       el("cancel").disabled = true;
       el("play").disabled = true;
@@ -331,14 +362,21 @@ function connect() {
     }
 
     if (msg.type === "matchFound") {
+      
       if (msg.roundSeconds) roundSeconds = Number(msg.roundSeconds);
-      inMatch = true;
+inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      endsAt = msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + Number(roundSeconds || 120));
-      tick();
-      setDebug(`config.roundSeconds=${roundSeconds} | matchFound.secondsLeft≈${Math.round(endsAt - (Date.now() / 1000))}`);
+      endsAt = (msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + Number(roundSeconds || 120)));
 
+      // Clamp UI countdown to roundSeconds in case a stale/incorrect endsAt comes in.
+      // This prevents "starts at 4:00" when the authoritative match length is 2:00.
+      const nowSec = Date.now() / 1000;
+      const uiLeft = Math.round(endsAt - nowSec);
+      if (uiLeft > (Number(roundSeconds || 120) + 2)) {
+        endsAt = nowSec + Number(roundSeconds || 120);
+      }
+      tick();
       setStatus("IN MATCH");
       const mMode = msg.mode || playMode;
       const band = (msg.band !== undefined && msg.band !== null) ? `±${msg.band}` : "";
@@ -352,6 +390,7 @@ function connect() {
       el("cancel").disabled = true;
       el("play").disabled = true;
 
+      // Initialize score labels
       if (youAre === "a") {
         el("aName").textContent = el("name").value || "You";
         el("bName").textContent = msg.opponent || "Opponent";
