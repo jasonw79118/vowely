@@ -1,3 +1,4 @@
+import os
 from __future__ import annotations
 
 import asyncio
@@ -170,7 +171,7 @@ ALLOWED_NON_CONSONANTS = VOWELS | ALLOWED_EXTRA
 ALL_CONSONANTS = [c for c in "abcdefghijklmnopqrstuvwxyz" if c not in VOWELS and c != "y"]
 WORD_RE = re.compile(r"^[a-z]+$")
 
-ROUND_SECONDS = 120
+ROUND_SECONDS = int(os.getenv("ROUND_SECONDS", "120"))
 
 MIN_WORD = 3
 MAX_WORD = 24

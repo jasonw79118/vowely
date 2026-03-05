@@ -329,7 +329,9 @@ function connect() {
     }
 
     if (msg.type === "matchFound") {
-      inMatch = true;
+      
+      if (msg.roundSeconds) roundSeconds = Number(msg.roundSeconds);
+inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
       endsAt = (msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + Number(roundSeconds || 120)));
