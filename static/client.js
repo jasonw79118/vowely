@@ -33,6 +33,56 @@ let leaderboardTimer = null;
 
 const el = (id) => document.getElementById(id);
 
+function appendLetter(ch) {
+  const w = el("word");
+  if (!w) return;
+  w.value = (w.value || "") + String(ch || "").toUpperCase();
+  w.focus();
+}
+
+function backspaceWord() {
+  const w = el("word");
+  if (!w) return;
+  w.value = (w.value || "").slice(0, -1);
+  w.focus();
+}
+
+function clearWord() {
+  const w = el("word");
+  if (!w) return;
+  w.value = "";
+  w.focus();
+}
+
+function makeTileButton(letter, cls) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = `letter-tile ${cls || ""}`.trim();
+  btn.textContent = letter;
+  btn.addEventListener("click", () => appendLetter(letter));
+  return btn;
+}
+
+function renderTileTrays(consonantsStr) {
+  // Vowels are always allowed (including Y) for mobile-friendly play.
+  const vowels = ["A","E","I","O","U","Y"];
+  const vowelWrap = el("vowelTiles");
+  if (vowelWrap) {
+    vowelWrap.innerHTML = "";
+    vowels.forEach(v => vowelWrap.appendChild(makeTileButton(v, "vowel")));
+  }
+
+  // Consonants come from the rotating set the server provides.
+  const consonantWrap = el("consonantTiles");
+  if (consonantWrap) {
+    consonantWrap.innerHTML = "";
+    const letters = String(consonantsStr || "").toUpperCase().replace(/[^A-Z]/g, "").split("");
+    letters.forEach(c => consonantWrap.appendChild(makeTileButton(c, "consonant")));
+  }
+}
+
+
+
 
 function setText(id, txt) {
   const node = el(id);
@@ -465,3 +515,5 @@ window.addEventListener("DOMContentLoaded", () => {
 
 
 connect();
+
+document.addEventListener('DOMContentLoaded', () => { renderTileTrays(document.getElementById('letters')?.textContent || ''); });
