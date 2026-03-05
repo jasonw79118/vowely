@@ -1,11 +1,3 @@
-function apiBase() {
-  return (window.VOWELY_API_BASE || window.VOWELY_API || "").replace(/\/$/, "");
-}
-function wsBase() {
-  const v = (window.VOWELY_WS_BASE || window.VOWELY_WS || "").replace(/\/$/, "");
-  return v;
-}
-
 function getPlayerId() {
   let pid = localStorage.getItem("vowely_player_id");
   if (!pid) {
@@ -29,6 +21,9 @@ function getWsBase() {
   if (location.hostname.endsWith("github.io")) return `${proto}://vowely.onrender.com`;
   return `${proto}://${location.host}`;
 }
+
+// Debug: show which backend we are using
+console.log("[vowely] apiBase:", getApiBase(), "wsBase:", getWsBase());
 
 let ws;
 let endsAt = 0;
@@ -149,7 +144,7 @@ async function refreshLeaderboard() {
   const box = el("leaderboardList");
   if (!box) return;
   try {
-    const res = await fetch(`/api/leaderboard?limit=25`, { cache: "no-store" });
+    const res = await fetch(`${getApiBase()}/api/leaderboard?limit=25`, { cache: "no-store" });
     const data = await res.json();
     const items = (data && data.items) ? data.items : [];
     box.innerHTML = "";
@@ -221,19 +216,6 @@ function send(type, payload = {}) {
   ws.send(JSON.stringify({ type, ...payload }));
 }
 
-
-function showRoundOver(summary) {
-  const modal = el("roundOverModal");
-  const body = el("roundOverBody");
-  if (!modal || !body) return;
-  body.textContent = summary;
-  modal.style.display = "flex";
-}
-function hideRoundOver() {
-  const modal = el("roundOverModal");
-  if (modal) modal.style.display = "none";
-}
-
 function resetUIForIdle() {
   inMatch = false;
   matchId = null;
@@ -253,9 +235,7 @@ function resetUIForIdle() {
 function connect() {
   const pid = encodeURIComponent(getPlayerId());
   const proto = (location.protocol === "https:") ? "wss" : "ws";
-  const wsOverride = wsBase();
-  const url = wsOverride ? `${wsOverride}/ws?pid=${pid}` : `${proto}://${location.host}/ws?pid=${pid}`;
-  ws = new WebSocket(url);
+  ws = new WebSocket(`${getWsBase()}/ws?pid=${pid}`);
 
   ws.onopen = () => {
     setStatus("CONNECTED");
@@ -405,21 +385,17 @@ function connect() {
       const reason = msg.endedReason ? ` (${msg.endedReason})` : "";
       logFeed(`Match ended. ${result}${reason}`);
 
-      // Reset local match state so you can immediately re-queue without refreshing
-      resetUIForIdle();
+      // show status and enable play again
       setStatus("READY");
-
-      // Confirm round over with a simple modal if present
-      const summary = `${result}${reason} | ${a.name} ${a.score} - ${b.score} ${b.name}`;
-      showRoundOver(summary);
-
+      el("play").disabled = false;
+      setMatchPill(null);
       return;
     }
   };
 }
 
 el("setName").onclick = () => send("setName", { name: el("name").value });
-el("play").onclick = () => { hideRoundOver(); send("play", { mode: playMode }); };
+el("play").onclick = () => send("play", { mode: playMode });
 el("cancel").onclick = () => send("cancelSearch");
 
 el("submit").onclick = () => {
@@ -448,7 +424,7 @@ window.addEventListener("DOMContentLoaded", () => {
     modeSel.addEventListener("change", () => { playMode = (modeSel.value || "casual"); });
   }
   const againBtn = el("playAgain");
-  if (againBtn) againBtn.addEventListener("click", () => { hideRoundOver(); send("play", { mode: playMode }); });
+  if (againBtn) againBtn.addEventListener("click", () => send("play", { mode: playMode }));
   const refreshBtn = el("refreshLeaderboard");
   if (refreshBtn) refreshBtn.addEventListener("click", refreshLeaderboard);
   if (!leaderboardTimer) leaderboardTimer = setInterval(refreshLeaderboard, 15000);
