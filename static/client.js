@@ -142,7 +142,7 @@ async function refreshLeaderboard() {
   const box = el("leaderboardList");
   if (!box) return;
   try {
-    const res = await fetch(`/api/leaderboard?limit=25`, { cache: "no-store" });
+    const res = await fetch(`${getApiBase()}/api/leaderboard?limit=25`, { cache: "no-store" });
     const data = await res.json();
     const items = (data && data.items) ? data.items : [];
     box.innerHTML = "";
@@ -246,7 +246,8 @@ function resetUIForIdle() {
 function connect() {
   const pid = encodeURIComponent(getPlayerId());
   const proto = (location.protocol === "https:") ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/ws?pid=${pid}`);
+  const wsBase = getWsBase();
+  ws = new WebSocket(`${wsBase}/ws?pid=${encodeURIComponent(pid)}`);
 
   ws.onopen = () => {
     setStatus("CONNECTED");
