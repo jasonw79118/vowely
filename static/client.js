@@ -33,6 +33,13 @@ let leaderboardTimer = null;
 
 const el = (id) => document.getElementById(id);
 
+function setDebug(msg) {
+  const d = el("debug");
+  if (!d) return;
+  d.textContent = msg;
+}
+
+
 
 function setText(id, txt) {
   const node = el(id);
@@ -207,8 +214,11 @@ async function syncConfig() {
       roundSeconds = j.roundSeconds;
     }
     console.log("[vowely] config roundSeconds:", roundSeconds);
-  } catch (e) {
+  
+    setDebug(`config.roundSeconds=${roundSeconds}`);
+} catch (e) {
     // keep default
+    setDebug(`config.roundSeconds=${roundSeconds} (config fetch failed)`);
   }
 }
 
@@ -317,7 +327,10 @@ function connect() {
       matchId = msg.matchId;
       youAre = msg.youAre;
       endsAt = (msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + Number(roundSeconds || 120)));
-      // (server also sends msg.endsAt; we prefer local countdown to avoid 4:00 display drift)
+      
+      const dur = Math.round(endsAt - (Date.now() / 1000));
+      setDebug(`config.roundSeconds=${roundSeconds} | matchFound.secondsLeft≈${dur}`);
+// (server also sends msg.endsAt; we prefer local countdown to avoid 4:00 display drift)
       setStatus("IN MATCH");
       setMatchPill("Reconnected " + matchId.slice(0, 8));
       el("opponent").textContent = msg.opponent || "Opponent";
