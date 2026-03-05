@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import random
 import re
@@ -12,6 +13,7 @@ from typing import Dict, Optional, Set, Tuple, List
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocket, WebSocketDisconnect
@@ -77,6 +79,23 @@ def tier_for_rating(rating: int) -> str:
 
 
 app = FastAPI()
+# CORS: allow GitHub Pages + local dev to call this API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://jasonw79118.github.io",
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -84,10 +103,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 def root():
     return FileResponse("static/index.html")
 
-
-@app.get("/api/config")
-async def api_config():
-    return {"roundSeconds": ROUND_SECONDS}
 
 @app.get("/api/leaderboard")
 def api_leaderboard(limit: int = 50):
@@ -112,6 +127,11 @@ def api_leaderboard(limit: int = 50):
         })
     return {"items": out}
 
+
+@app.get("/api/config")
+def api_config():
+    return {"roundSeconds": int(ROUND_SECONDS)}
+
 # ---------------------------
 # Game rules (Vowely)
 # ---------------------------
@@ -121,9 +141,13 @@ ALLOWED_NON_CONSONANTS = VOWELS | ALLOWED_EXTRA
 ALL_CONSONANTS = [c for c in "abcdefghijklmnopqrstuvwxyz" if c not in VOWELS and c != "y"]
 WORD_RE = re.compile(r"^[a-z]+$")
 
-ROUND_SECONDS = 120
-print(f"[vowely] ROUND_SECONDS={ROUND_SECONDS}")
-
+ROUND_SECONDS = int(os.getenv("VOWELY_ROUND_SECONDS", "120") or "120")
+# Hard clamp to 2 minutes (120s) unless explicitly overridden higher on purpose
+# If you never want longer rounds, keep this clamp.
+ROUND_SECONDS = 120 if ROUND_SECONDS <= 0 else ROUND_SECONDS
+if ROUND_SECONDS != 120:
+    print(f"[VOWELY] WARNING: ROUND_SECONDS env requested {ROUND_SECONDS}; forcing 120 for game balance")
+    ROUND_SECONDS = 120
 MIN_WORD = 3
 MAX_WORD = 24
 
@@ -718,10 +742,10 @@ async def start_match(user1: str, user2: str, *, is_ranked: bool, band: Optional
             hub.user_match[user2] = match_id
             pc2.state = "in_match"
     await hub.send(user1, {"type":"matchFound","matchId":m.match_id,"youAre":"a","opponent":m.b_name,"consonants":sorted(list(m.consonants)),
-                           "endsAt":m.ends_at,"mode":("ranked" if is_ranked else "casual"),"band":band})
+                           "endsAt":m.ends_at,"roundSeconds":int(ROUND_SECONDS),"mode":("ranked" if is_ranked else "casual"),"band":band})
     if not use_bot:
         await hub.send(user2, {"type":"matchFound","matchId":m.match_id,"youAre":"b","opponent":m.a_name,"consonants":sorted(list(m.consonants)),
-                               "endsAt":m.ends_at,"mode":("ranked" if is_ranked else "casual"),"band":band})
+                               "endsAt":m.ends_at,"roundSeconds":int(ROUND_SECONDS),"mode":("ranked" if is_ranked else "casual"),"band":band})
     await hub.broadcast_scores(m)
     asyncio.create_task(end_match_at(m.match_id, m.ends_at))
     if use_bot:
@@ -868,6 +892,7 @@ async def end_match_at(match_id: str, ends_at: float):
 @app.on_event("startup")
 async def startup():
     db_init()
+    print(f"[VOWELY] startup ROUND_SECONDS={int(ROUND_SECONDS)}")
     asyncio.create_task(matchmaking_loop())
 
 
