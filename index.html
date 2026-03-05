@@ -4,34 +4,27 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Vowely</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .box { border: 1px solid #ddd; border-radius: 12px; padding: 12px; }
-    .big { font-size: 28px; font-weight: 800; letter-spacing: 1px; }
-    .muted { color: #666; }
-    .row { display:flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-    input, button, select { font-size: 16px; padding: 10px; }
-    #feed { height: 140px; overflow:auto; background:#fafafa; border:1px solid #eee; border-radius: 10px; padding: 8px; }
-    #mywords { height: 170px; overflow:auto; background:#fafafa; border:1px solid #eee; border-radius: 10px; padding: 8px; }
-    table { width:100%; border-collapse: collapse; }
-    th, td { text-align:left; padding: 6px; border-bottom: 1px solid #eee; }
-    .pill { display:inline-block; padding: 4px 10px; border:1px solid #ddd; border-radius: 999px; }
-      @media (max-width: 860px) {
-      .grid { grid-template-columns: 1fr; }
-      input, button, select { width: 100%; box-sizing: border-box; }
-      .row { flex-direction: column; align-items: stretch; }
-      body { margin: 12px; }
-      .big { font-size: 24px; }
-    }
-  </style>
+  <link rel="stylesheet" href="style.css?v=2026-03-05-1"/>
 </head>
 <body>
+  <header class="topbar">
+    <div class="brand">
+      <img class="brand-icon" src="vowely_app_icon.png" alt="Vowely"/>
+      <div class="brand-title">Vowely</div>
+    </div>
+    <div class="topbar-right">
+      <div class="pill" id="status">DISCONNECTED</div>
+      <div class="pill" id="matchpill" style="display:none"></div>
+    </div>
+  </header>
+  <main>
+
+
   <h1>Vowely</h1>
 
   
 
-  <div id="profileBar" class="box" style="margin-bottom:12px;">
+  <div id="profileBar" class="card" style="margin-bottom:12px;">
     <div class="row" style="justify-content:space-between; align-items:center;">
       <div><strong>Tier:</strong> <span id="tierValue">—</span></div>
       <div><strong>Rating:</strong> <span id="ratingValue">—</span></div>
@@ -42,7 +35,7 @@
     </div>
   </div>
 
-  <div id="recentWrap" class="box" style="margin-bottom:12px;">
+  <div id="recentWrap" class="card" style="margin-bottom:12px;">
     <div class="row" style="justify-content:space-between; align-items:center;">
       <strong>Recent matches</strong>
       <button id="toggleRecentBtn" type="button">Hide</button>
@@ -51,11 +44,8 @@
     <div id="recentEmpty" class="muted" style="margin-top:10px; display:none;">No matches yet.</div>
   </div>
 
-<div class="grid">
-    <div class="box">
-      <div class="muted">Status</div>
-      <div id="status" class="big">CONNECTING…</div>
-
+<div class="layout">
+    <div class="card">
       <div class="row">
         <input id="name" placeholder="Your name" />
         <button id="setName">Set Name</button>
@@ -79,8 +69,6 @@
 
       <div class="muted">Time left</div>
       <div id="timer" class="big">—</div>
-<div id="debug" style="font: 12px/1.4 system-ui; opacity: .75; margin-top: 6px;"></div>
-
 
       <div class="muted">Consonants (vowels + Y always allowed)</div>
       <div id="cons" class="big">—</div>
@@ -103,7 +91,7 @@
       </div>
     </div>
 
-    <div class="box">
+    <div class="card">
       <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
         <h3 style="margin:0;">Leaderboard</h3>
         <button id="refreshLeaderboard" type="button">Refresh</button>
@@ -133,6 +121,7 @@
     </div>
   </div>
 
-  <script src="static/client.js?v=2026-03-05-8"></script>
+  <script src="static/client.js?v=2026-03-05-9"></script>
+  </main>
 </body>
 </html>
