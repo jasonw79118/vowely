@@ -12,7 +12,7 @@ from typing import Dict, Optional, Set, Tuple, List
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 
@@ -77,13 +77,17 @@ def tier_for_rating(rating: int) -> str:
 
 
 app = FastAPI()
-app.mount("/static", StaticFiles(directory="static", check_dir=False), name="static")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
 def root():
     return FileResponse("static/index.html")
 
+
+@app.get("/api/config")
+async def api_config():
+    return {"roundSeconds": ROUND_SECONDS}
 
 @app.get("/api/leaderboard")
 def api_leaderboard(limit: int = 50):
@@ -118,6 +122,7 @@ ALL_CONSONANTS = [c for c in "abcdefghijklmnopqrstuvwxyz" if c not in VOWELS and
 WORD_RE = re.compile(r"^[a-z]+$")
 
 ROUND_SECONDS = 120
+print(f"[vowely] ROUND_SECONDS={ROUND_SECONDS}")
 
 MIN_WORD = 3
 MAX_WORD = 24
@@ -1078,12 +1083,3 @@ async def websocket_endpoint(ws: WebSocket):
                 hub.clients.pop(uid, None)
                 hub.user_match.pop(uid, None)
             await hub.cancel_search(uid)
-@app.get("/")
-async def root():
-    p_static = Path("static") / "index.html"
-    p_root = Path("index.html")
-    if p_static.exists():
-        return FileResponse(str(p_static))
-    if p_root.exists():
-        return FileResponse(str(p_root))
-    return {"ok": True, "service": "vowely"}
