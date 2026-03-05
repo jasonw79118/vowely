@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import random
 import re
 import sqlite3
 import time
-import os
 import uuid
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Set, Tuple, List
@@ -109,6 +109,11 @@ def api_leaderboard(limit: int = 50):
         })
     return {"items": out}
 
+
+@app.get("/api/config")
+def api_config():
+    return {"roundSeconds": int(ROUND_SECONDS)}
+
 # ---------------------------
 # Game rules (Vowely)
 # ---------------------------
@@ -118,8 +123,13 @@ ALLOWED_NON_CONSONANTS = VOWELS | ALLOWED_EXTRA
 ALL_CONSONANTS = [c for c in "abcdefghijklmnopqrstuvwxyz" if c not in VOWELS and c != "y"]
 WORD_RE = re.compile(r"^[a-z]+$")
 
-ROUND_SECONDS = int(os.getenv("VOWELY_ROUND_SECONDS", "120"))  # default 2 minutes
-print(f"[vowely] ROUND_SECONDS={ROUND_SECONDS}")
+ROUND_SECONDS = int(os.getenv("VOWELY_ROUND_SECONDS", "120") or "120")
+# Hard clamp to 2 minutes (120s) unless explicitly overridden higher on purpose
+# If you never want longer rounds, keep this clamp.
+ROUND_SECONDS = 120 if ROUND_SECONDS <= 0 else ROUND_SECONDS
+if ROUND_SECONDS != 120:
+    print(f"[VOWELY] WARNING: ROUND_SECONDS env requested {ROUND_SECONDS}; forcing 120 for game balance")
+    ROUND_SECONDS = 120
 MIN_WORD = 3
 MAX_WORD = 24
 
@@ -714,10 +724,10 @@ async def start_match(user1: str, user2: str, *, is_ranked: bool, band: Optional
             hub.user_match[user2] = match_id
             pc2.state = "in_match"
     await hub.send(user1, {"type":"matchFound","matchId":m.match_id,"youAre":"a","opponent":m.b_name,"consonants":sorted(list(m.consonants)),
-                           "endsAt":m.ends_at, "roundSeconds":ROUND_SECONDS,"mode":("ranked" if is_ranked else "casual"),"band":band})
+                           "endsAt":m.ends_at,"roundSeconds":int(ROUND_SECONDS),"mode":("ranked" if is_ranked else "casual"),"band":band})
     if not use_bot:
         await hub.send(user2, {"type":"matchFound","matchId":m.match_id,"youAre":"b","opponent":m.a_name,"consonants":sorted(list(m.consonants)),
-                               "endsAt":m.ends_at, "roundSeconds":ROUND_SECONDS,"mode":("ranked" if is_ranked else "casual"),"band":band})
+                               "endsAt":m.ends_at,"roundSeconds":int(ROUND_SECONDS),"mode":("ranked" if is_ranked else "casual"),"band":band})
     await hub.broadcast_scores(m)
     asyncio.create_task(end_match_at(m.match_id, m.ends_at))
     if use_bot:
@@ -861,13 +871,10 @@ async def end_match_at(match_id: str, ends_at: float):
     hub.matches.pop(match_id, None)
 
 
-
-@app.get("/api/config")
-async def api_config():
-    return {"roundSeconds": ROUND_SECONDS}
 @app.on_event("startup")
 async def startup():
     db_init()
+    print(f"[VOWELY] startup ROUND_SECONDS={int(ROUND_SECONDS)}")
     asyncio.create_task(matchmaking_loop())
 
 
