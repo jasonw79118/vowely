@@ -1,4 +1,3 @@
-import os
 from __future__ import annotations
 
 import asyncio
@@ -79,7 +78,6 @@ def tier_for_rating(rating: int) -> str:
 
 app = FastAPI()
 
-print(f"VOWELY_ROUND_SECONDS={ROUND_SECONDS}")
 # --- Hard CORS (GitHub Pages -> Render) ---
 HARD_CORS_ALLOW_ORIGINS = {
     "https://jasonw79118.github.io",
@@ -116,11 +114,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 def root():
-    # Serve the UI when running backend directly (Render/local).
     return FileResponse("static/index.html")
 
 @app.head("/")
-
 def root_head():
     # Render health checks often use HEAD /. FastAPI doesn't always auto-wire HEAD when
     # returning FileResponse, so we provide an explicit 200 for stability.
@@ -133,7 +129,6 @@ def healthz():
 @app.head("/healthz")
 def healthz_head():
     return Response(status_code=200)
-ex.html")
 
 
 @app.get("/api/config")
@@ -768,10 +763,10 @@ async def start_match(user1: str, user2: str, *, is_ranked: bool, band: Optional
             hub.user_match[user2] = match_id
             pc2.state = "in_match"
     await hub.send(user1, {"type":"matchFound","matchId":m.match_id,"youAre":"a","opponent":m.b_name,"consonants":sorted(list(m.consonants)),
-                           "endsAt":m.ends_at,"mode":("ranked" if is_ranked else "casual"),"band":band})
+                           "endsAt":m.ends_at,"roundSeconds":ROUND_SECONDS,"mode":("ranked" if is_ranked else "casual"),"band":band})
     if not use_bot:
         await hub.send(user2, {"type":"matchFound","matchId":m.match_id,"youAre":"b","opponent":m.a_name,"consonants":sorted(list(m.consonants)),
-                               "endsAt":m.ends_at,"mode":("ranked" if is_ranked else "casual"),"band":band})
+                               "endsAt":m.ends_at,"roundSeconds":ROUND_SECONDS,"mode":("ranked" if is_ranked else "casual"),"band":band})
     await hub.broadcast_scores(m)
     asyncio.create_task(end_match_at(m.match_id, m.ends_at))
     if use_bot:
