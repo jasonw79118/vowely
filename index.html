@@ -4,8 +4,14 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Vowely</title>
-  <link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="style.css?v=2026-03-05-1"/>
+
+  <!-- Correct favicon paths for GitHub Pages project site -->
+  <link rel="icon" href="/vowely/favicon.ico">
+  <link rel="shortcut icon" href="/vowely/favicon.ico">
+  <link rel="apple-touch-icon" href="/vowely/apple-touch-icon.png">
+
+  <!-- Single CSS load with cache busting -->
+  <link rel="stylesheet" href="style.css?v=2026-03-05-2"/>
 </head>
 <body>
   <header class="topbar">
@@ -18,12 +24,9 @@
       <div class="pill" id="matchpill" style="display:none"></div>
     </div>
   </header>
+
   <main>
-
-
   <h1>Vowely</h1>
-
-  
 
   <div id="profileBar" class="card" style="margin-bottom:12px;">
     <div class="row" style="justify-content:space-between; align-items:center;">
@@ -45,7 +48,8 @@
     <div id="recentEmpty" class="muted" style="margin-top:10px; display:none;">No matches yet.</div>
   </div>
 
-<div class="layout">
+  <div class="layout">
+
     <div class="card">
       <div class="row">
         <input id="name" placeholder="Your name" />
@@ -72,16 +76,18 @@
       <div id="timer" class="big">—</div>
 
       <div class="muted">Consonants (vowels + Y always allowed)</div>
-<div class="tile-trays">
-  <div class="tray">
-    <div class="tray-title">Vowels</div>
-    <div id="vowelTiles" class="tiles-grid" aria-label="Vowel tiles"></div>
-  </div>
-  <div class="tray">
-    <div class="tray-title">Consonants</div>
-    <div id="consonantTiles" class="tiles-grid" aria-label="Consonant tiles"></div>
-  </div>
-</div>
+
+      <div class="tile-trays">
+        <div class="tray">
+          <div class="tray-title">Vowels</div>
+          <div id="vowelTiles" class="tiles-grid"></div>
+        </div>
+        <div class="tray">
+          <div class="tray-title">Consonants</div>
+          <div id="consonantTiles" class="tiles-grid"></div>
+        </div>
+      </div>
+
       <div id="cons" class="big">—</div>
 
       <hr/>
@@ -89,13 +95,13 @@
       <div class="muted">Submit word</div>
       <div class="row">
         <input id="word" placeholder="Type a word…" />
-<div class="word-controls">
-  <button id="backspaceWord" type="button" class="btn">⌫</button>
-  <button id="clearWord" type="button" class="btn">Clear</button>
-</div>
-
+        <div class="word-controls">
+          <button id="backspaceWord" type="button" class="btn">⌫</button>
+          <button id="clearWord" type="button" class="btn">Clear</button>
+        </div>
         <button id="submit">Submit</button>
       </div>
+
       <div id="feedback" class="muted"></div>
 
       <div class="row">
@@ -112,6 +118,7 @@
         <h3 style="margin:0;">Leaderboard</h3>
         <button id="refreshLeaderboard" type="button">Refresh</button>
       </div>
+
       <div id="leaderboardList" style="margin-top:8px; max-height:220px; overflow:auto; border:1px solid #eee; border-radius:10px; background:#fafafa;"></div>
 
       <hr/>
@@ -135,9 +142,12 @@
       <h3>Match feed</h3>
       <div id="feed"></div>
     </div>
+
   </div>
 
-  <script src="static/client.js?v=2026-03-05-9"></script>
+  <!-- JS cache bust version increased to kill timer caching -->
+  <script src="static/client.js?v=2026-03-05-10"></script>
+
   </main>
 </body>
 </html>
