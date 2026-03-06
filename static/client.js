@@ -1,4 +1,5 @@
-const CLIENT_BUILD = window.__VOWELY_BUILD__ || "2026-03-06-3";
+const CLIENT_BUILD = window.__VOWELY_BUILD__ || "2026-03-06-4";
+const FORCED_ROUND_SECONDS = 120;
 
 function getPlayerId() {
   let pid = localStorage.getItem("vowely_player_id");
@@ -20,7 +21,7 @@ function getWsBase() {
   return `${proto}://${location.host}`;
 }
 
-let roundSeconds = 120;
+let roundSeconds = FORCED_ROUND_SECONDS;
 let ws;
 let endsAt = 0;
 let inMatch = false;
@@ -253,15 +254,11 @@ function setMatchPill(text) {
 }
 
 async function syncConfig() {
+  roundSeconds = FORCED_ROUND_SECONDS;
   try {
-    const r = await fetch(`${getApiBase()}/api/config?_=${encodeURIComponent(CLIENT_BUILD)}`, {
+    await fetch(`${getApiBase()}/api/config?_=${encodeURIComponent(CLIENT_BUILD)}`, {
       cache: "no-store"
     });
-    if (!r.ok) return;
-    const j = await r.json();
-    if (j && typeof j.roundSeconds === "number" && j.roundSeconds > 0) {
-      roundSeconds = j.roundSeconds;
-    }
   } catch (e) {}
 }
 
@@ -304,6 +301,11 @@ function resetUIForIdle() {
   const cancelBtn = el("cancel");
   if (playBtn) playBtn.disabled = false;
   if (cancelBtn) cancelBtn.disabled = true;
+}
+
+function forceLocalTimer() {
+  roundSeconds = FORCED_ROUND_SECONDS;
+  endsAt = (Date.now() / 1000) + FORCED_ROUND_SECONDS;
 }
 
 async function connect() {
@@ -381,8 +383,7 @@ async function connect() {
       inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      const localRound = Number(roundSeconds || 120);
-      endsAt = msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + localRound);
+      forceLocalTimer();
 
       setStatus("IN MATCH");
       setMatchPill("Reconnected " + matchId.slice(0, 8));
@@ -402,13 +403,10 @@ async function connect() {
     }
 
     if (msg.type === "matchFound") {
-      roundSeconds = msg.roundSeconds ? Number(msg.roundSeconds) : 120;
       inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-
-      const localRound = Number(roundSeconds || 120);
-      endsAt = msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + localRound);
+      forceLocalTimer();
 
       setStatus("IN MATCH");
       const mMode = msg.mode || playMode;
