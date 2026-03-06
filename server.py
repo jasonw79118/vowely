@@ -7,12 +7,16 @@ import re
 import sqlite3
 import time
 import uuid
+import os
+import secrets
+import hashlib
+import hmac
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Set, Tuple, List
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, Response
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Response, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 
@@ -77,6 +81,12 @@ def tier_for_rating(rating: int) -> str:
 
 
 app = FastAPI()
+
+SESSION_COOKIE_NAME = "vowely_session"
+SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
+PASSWORD_MIN_LENGTH = 8
+USERNAME_RE = re.compile(r"^[a-z0-9_]{3,20}$")
+
 
 # --- Hard CORS (GitHub Pages -> Render) ---
 HARD_CORS_ALLOW_ORIGINS = {
@@ -218,6 +228,165 @@ def db_connect() -> sqlite3.Connection:
 DB = db_connect()
 
 
+def _now_ts() -> float:
+    return time.time()
+
+
+def _safe_row_get(row: sqlite3.Row, key: str, default=None):
+    try:
+        return row[key] if key in row.keys() else default
+    except Exception:
+        return default
+
+
+def normalize_email(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def normalize_username(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 200000)
+    return f"pbkdf2_sha256$200000${salt}${dk.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        scheme, rounds, salt, expected = (stored or "").split("$", 3)
+        if scheme != "pbkdf2_sha256":
+            return False
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), int(rounds))
+        return hmac.compare_digest(dk.hex(), expected)
+    except Exception:
+        return False
+
+
+def profile_payload(user: sqlite3.Row) -> dict:
+    return {
+        "userId": str(user["user_id"]),
+        "username": str(_safe_row_get(user, "username", "") or ""),
+        "displayName": str(_safe_row_get(user, "name", "") or ""),
+        "email": str(_safe_row_get(user, "email", "") or ""),
+        "isGuest": bool(int(_safe_row_get(user, "is_guest", 1) or 0)),
+        "authProvider": str(_safe_row_get(user, "auth_provider", "guest") or "guest"),
+        "avatarSeed": str(_safe_row_get(user, "avatar_seed", "") or ""),
+        "rating": int(_safe_row_get(user, "rating", 1200) or 1200),
+        "wins": int(_safe_row_get(user, "wins", 0) or 0),
+        "losses": int(_safe_row_get(user, "losses", 0) or 0),
+        "tier": str(_safe_row_get(user, "tier", tier_for_rating(int(_safe_row_get(user, "rating", 1200) or 1200))) or "Bronze"),
+        "rankedGames": int(_safe_row_get(user, "ranked_games", 0) or 0),
+        "casualGames": int(_safe_row_get(user, "casual_games", 0) or 0),
+        "lastResult": str(_safe_row_get(user, "last_result", "") or ""),
+        "lastDelta": int(_safe_row_get(user, "last_delta", 0) or 0),
+    }
+
+
+def get_user_by_email_or_username(email_or_username: str) -> Optional[sqlite3.Row]:
+    value = (email_or_username or "").strip()
+    if not value:
+        return None
+    cur = DB.cursor()
+    cur.execute(
+        "SELECT * FROM users WHERE lower(email) = ? OR lower(username) = ? LIMIT 1",
+        (normalize_email(value), normalize_username(value)),
+    )
+    return cur.fetchone()
+
+
+def username_exists(username: str, exclude_user_id: str = "") -> bool:
+    cur = DB.cursor()
+    if exclude_user_id:
+        cur.execute("SELECT 1 FROM users WHERE lower(username) = ? AND user_id != ? LIMIT 1", (normalize_username(username), exclude_user_id))
+    else:
+        cur.execute("SELECT 1 FROM users WHERE lower(username) = ? LIMIT 1", (normalize_username(username),))
+    return cur.fetchone() is not None
+
+
+def email_exists(email: str, exclude_user_id: str = "") -> bool:
+    cur = DB.cursor()
+    if exclude_user_id:
+        cur.execute("SELECT 1 FROM users WHERE lower(email) = ? AND user_id != ? LIMIT 1", (normalize_email(email), exclude_user_id))
+    else:
+        cur.execute("SELECT 1 FROM users WHERE lower(email) = ? LIMIT 1", (normalize_email(email),))
+    return cur.fetchone() is not None
+
+
+def create_session(user_id: str, request: Optional[Request] = None) -> str:
+    now = _now_ts()
+    sid = secrets.token_urlsafe(32)
+    ua = request.headers.get("user-agent", "")[:300] if request else ""
+    ip = (request.client.host if request and request.client else "")[:80]
+    DB.execute(
+        "INSERT INTO sessions (session_id, user_id, created_at, expires_at, last_seen_at, user_agent, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (sid, user_id, now, now + SESSION_TTL_SECONDS, now, ua, ip),
+    )
+    DB.commit()
+    return sid
+
+
+def get_session(session_id: str) -> Optional[sqlite3.Row]:
+    if not session_id:
+        return None
+    cur = DB.cursor()
+    cur.execute("SELECT * FROM sessions WHERE session_id = ? LIMIT 1", (session_id,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    if float(row["expires_at"] or 0) < _now_ts():
+        DB.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        DB.commit()
+        return None
+    DB.execute("UPDATE sessions SET last_seen_at = ? WHERE session_id = ?", (_now_ts(), session_id))
+    DB.commit()
+    return row
+
+
+def destroy_session(session_id: str) -> None:
+    if not session_id:
+        return
+    DB.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+    DB.commit()
+
+
+def get_current_user_from_request(request: Request) -> Optional[sqlite3.Row]:
+    sid = request.cookies.get(SESSION_COOKIE_NAME, "")
+    sess = get_session(sid)
+    if not sess:
+        return None
+    return get_user(str(sess["user_id"]))
+
+
+def attach_session_cookie(resp: Response, session_id: str) -> None:
+    resp.set_cookie(
+        SESSION_COOKIE_NAME,
+        session_id,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
+
+
+def clear_session_cookie(resp: Response) -> None:
+    resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+
+
+def valid_username(value: str) -> bool:
+    return bool(USERNAME_RE.fullmatch(normalize_username(value)))
+
+
+def valid_password(value: str) -> bool:
+    return len((value or "").strip()) >= PASSWORD_MIN_LENGTH
+
+
+def guest_id_from_request(request: Request) -> str:
+    return (request.headers.get("X-Guest-Player-Id", "") or "").strip()[:80]
+
+
 def db_init() -> None:
     cur = DB.cursor()
 
@@ -265,6 +434,31 @@ def db_init() -> None:
         cur.execute("ALTER TABLE users ADD COLUMN ranked_games INTEGER NOT NULL DEFAULT 0;")
     if "casual_games" not in user_cols:
         cur.execute("ALTER TABLE users ADD COLUMN casual_games INTEGER NOT NULL DEFAULT 0;")
+    if "email" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN email TEXT;")
+    if "password_hash" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN password_hash TEXT;")
+    if "auth_provider" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT 'guest';")
+    if "is_guest" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 1;")
+    if "is_verified" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN is_verified INTEGER NOT NULL DEFAULT 0;")
+    if "avatar_seed" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN avatar_seed TEXT;")
+    if "last_login_at" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN last_login_at REAL NOT NULL DEFAULT 0;")
+    if "linked_guest_id" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN linked_guest_id TEXT;")
+    if "username" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN username TEXT;")
+
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email);")
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(username);")
+    cur.execute("CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL, last_seen_at REAL NOT NULL, user_agent TEXT, ip_address TEXT);")
+    cur.execute("CREATE TABLE IF NOT EXISTS password_reset_tokens (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL, used_at REAL NOT NULL DEFAULT 0);")
+    cur.execute("CREATE TABLE IF NOT EXISTS friend_requests (request_id TEXT PRIMARY KEY, from_user_id TEXT NOT NULL, to_user_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at REAL NOT NULL, responded_at REAL NOT NULL DEFAULT 0);")
+    cur.execute("CREATE TABLE IF NOT EXISTS friends (pair_key TEXT PRIMARY KEY, user_a TEXT NOT NULL, user_b TEXT NOT NULL, created_at REAL NOT NULL);")
 
     cur.execute("PRAGMA table_info(matches);")
     match_cols = {row[1] for row in cur.fetchall()}
@@ -919,6 +1113,157 @@ async def startup():
 # ---------------------------
 # WebSocket endpoint
 # ---------------------------
+@app.get("/api/me")
+def api_me(request: Request):
+    user = get_current_user_from_request(request)
+    if user:
+        return {"authenticated": True, "profile": profile_payload(user), "recent": get_recent_matches(str(user["user_id"]), limit=20)}
+    pid = guest_id_from_request(request)
+    if pid:
+        guest = get_user(pid)
+        if guest:
+            return {"authenticated": False, "profile": profile_payload(guest), "recent": get_recent_matches(str(guest["user_id"]), limit=20)}
+    return {"authenticated": False, "profile": None, "recent": []}
+
+
+@app.post("/api/auth/signup")
+async def api_auth_signup(request: Request):
+    data = await request.json()
+    email = normalize_email(data.get("email", ""))
+    username = normalize_username(data.get("username", ""))
+    password = (data.get("password", "") or "")
+    display_name = (data.get("displayName") or data.get("display_name") or username).strip()
+
+    if not email or "@" not in email:
+        return JSONResponse({"ok": False, "error": "Enter a valid email address."}, status_code=400)
+    if not valid_username(username):
+        return JSONResponse({"ok": False, "error": "Username must be 3-20 chars using letters, numbers, or underscore."}, status_code=400)
+    if not valid_password(password):
+        return JSONResponse({"ok": False, "error": "Password must be at least 8 characters."}, status_code=400)
+    if not is_name_allowed(display_name):
+        return JSONResponse({"ok": False, "error": "Display name is not allowed."}, status_code=400)
+    if email_exists(email):
+        return JSONResponse({"ok": False, "error": "That email is already in use."}, status_code=400)
+    if username_exists(username):
+        return JSONResponse({"ok": False, "error": "That username is already taken."}, status_code=400)
+
+    user_id = str(uuid.uuid4())
+    now = _now_ts()
+    DB.execute(
+        "INSERT INTO users (user_id, name, rating, wins, losses, created_at, tier, ranked_games, casual_games, email, password_hash, auth_provider, is_guest, is_verified, avatar_seed, last_login_at, linked_guest_id, username) VALUES (?, ?, 1200, 0, 0, ?, ?, 0, 0, ?, ?, 'password', 0, 0, ?, ?, '', ?)",
+        (user_id, display_name, now, tier_for_rating(1200), email, hash_password(password), username, now, username),
+    )
+    DB.commit()
+    user = get_user(user_id)
+    sid = create_session(user_id, request)
+    resp = JSONResponse({"ok": True, "profile": profile_payload(user), "recent": []})
+    attach_session_cookie(resp, sid)
+    return resp
+
+
+@app.post("/api/auth/login")
+async def api_auth_login(request: Request):
+    data = await request.json()
+    value = data.get("emailOrUsername", "")
+    password = (data.get("password", "") or "")
+    user = get_user_by_email_or_username(value)
+    if not user or not verify_password(password, str(_safe_row_get(user, "password_hash", "") or "")):
+        return JSONResponse({"ok": False, "error": "Invalid login."}, status_code=400)
+    now = _now_ts()
+    DB.execute("UPDATE users SET last_login_at = ?, is_guest = 0, auth_provider = CASE WHEN auth_provider = '' THEN 'password' ELSE auth_provider END WHERE user_id = ?", (now, str(user["user_id"])))
+    DB.commit()
+    user = get_user(str(user["user_id"]))
+    sid = create_session(str(user["user_id"]), request)
+    resp = JSONResponse({"ok": True, "profile": profile_payload(user), "recent": get_recent_matches(str(user["user_id"]), limit=20)})
+    attach_session_cookie(resp, sid)
+    return resp
+
+
+@app.post("/api/auth/logout")
+async def api_auth_logout(request: Request):
+    sid = request.cookies.get(SESSION_COOKIE_NAME, "")
+    destroy_session(sid)
+    resp = JSONResponse({"ok": True})
+    clear_session_cookie(resp)
+    return resp
+
+
+@app.post("/api/auth/upgrade-guest")
+async def api_auth_upgrade_guest(request: Request):
+    data = await request.json()
+    guest_id = guest_id_from_request(request) or str(data.get("guestId", "")).strip()
+    if not guest_id:
+        return JSONResponse({"ok": False, "error": "Guest player id not found."}, status_code=400)
+    user = get_user(guest_id)
+    if not user:
+        return JSONResponse({"ok": False, "error": "Guest profile not found."}, status_code=404)
+
+    email = normalize_email(data.get("email", ""))
+    username = normalize_username(data.get("username", ""))
+    password = (data.get("password", "") or "")
+    display_name = (data.get("displayName") or data.get("display_name") or str(user["name"])).strip()
+
+    if not email or "@" not in email:
+        return JSONResponse({"ok": False, "error": "Enter a valid email address."}, status_code=400)
+    if not valid_username(username):
+        return JSONResponse({"ok": False, "error": "Username must be 3-20 chars using letters, numbers, or underscore."}, status_code=400)
+    if not valid_password(password):
+        return JSONResponse({"ok": False, "error": "Password must be at least 8 characters."}, status_code=400)
+    if not is_name_allowed(display_name):
+        return JSONResponse({"ok": False, "error": "Display name is not allowed."}, status_code=400)
+    if email_exists(email, exclude_user_id=guest_id):
+        return JSONResponse({"ok": False, "error": "That email is already in use."}, status_code=400)
+    if username_exists(username, exclude_user_id=guest_id):
+        return JSONResponse({"ok": False, "error": "That username is already taken."}, status_code=400)
+
+    now = _now_ts()
+    DB.execute(
+        "UPDATE users SET name = ?, email = ?, username = ?, password_hash = ?, auth_provider = 'password', is_guest = 0, is_verified = 0, avatar_seed = COALESCE(avatar_seed, ?), last_login_at = ?, linked_guest_id = ? WHERE user_id = ?",
+        (display_name, email, username, hash_password(password), username, now, guest_id, guest_id),
+    )
+    DB.commit()
+    user = get_user(guest_id)
+    sid = create_session(guest_id, request)
+    resp = JSONResponse({"ok": True, "profile": profile_payload(user), "recent": get_recent_matches(guest_id, limit=20)})
+    attach_session_cookie(resp, sid)
+    return resp
+
+
+@app.patch("/api/me")
+async def api_me_patch(request: Request):
+    user = get_current_user_from_request(request)
+    if not user:
+        return JSONResponse({"ok": False, "error": "Not logged in."}, status_code=401)
+    data = await request.json()
+    display_name = (data.get("displayName") or data.get("display_name") or str(user["name"])).strip()
+    avatar_seed = (data.get("avatarSeed") or data.get("avatar_seed") or _safe_row_get(user, "avatar_seed", "")).strip()[:64]
+    if not is_name_allowed(display_name):
+        return JSONResponse({"ok": False, "error": "Display name is not allowed."}, status_code=400)
+    DB.execute("UPDATE users SET name = ?, avatar_seed = ? WHERE user_id = ?", (display_name, avatar_seed, str(user["user_id"])))
+    DB.commit()
+    user = get_user(str(user["user_id"]))
+    return {"ok": True, "profile": profile_payload(user)}
+
+
+@app.get("/api/friends")
+def api_friends(request: Request):
+    user = get_current_user_from_request(request)
+    if not user:
+        return JSONResponse({"ok": False, "error": "Not logged in."}, status_code=401)
+    uid = str(user["user_id"])
+    cur = DB.cursor()
+    cur.execute("SELECT request_id, from_user_id, to_user_id, status, created_at FROM friend_requests WHERE status = 'pending' AND (from_user_id = ? OR to_user_id = ?) ORDER BY created_at DESC", (uid, uid))
+    pending = [dict(r) for r in cur.fetchall() or []]
+    cur.execute("SELECT user_a, user_b, created_at FROM friends WHERE user_a = ? OR user_b = ? ORDER BY created_at DESC", (uid, uid))
+    friends = []
+    for r in cur.fetchall() or []:
+        other = r["user_b"] if r["user_a"] == uid else r["user_a"]
+        u = get_user(str(other))
+        if u:
+            friends.append(profile_payload(u))
+    return {"ok": True, "friends": friends, "pending": pending}
+
+
 def get_pid_from_ws(ws: WebSocket) -> str:
     # ws.scope["query_string"] is bytes like b"pid=..."
     qs = ws.scope.get("query_string", b"").decode("utf-8", errors="ignore")
