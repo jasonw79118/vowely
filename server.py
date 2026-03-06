@@ -168,6 +168,34 @@ def api_leaderboard(limit: int = 50):
         })
     return {"items": out}
 
+@app.get("/api/me")
+def api_me(request: Request):
+    user = get_current_user_from_request(request)
+
+    # If authenticated user
+    if user:
+        return {
+            "authenticated": True,
+            "profile": profile_payload(user),
+            "recent": get_recent_matches(user["user_id"], 20),
+        }
+
+    # Guest fallback
+    guest_id = guest_id_from_request(request)
+    if guest_id:
+        user = get_or_create_user(guest_id, "Guest")
+        return {
+            "authenticated": False,
+            "profile": profile_payload(user),
+            "recent": get_recent_matches(user["user_id"], 20),
+        }
+
+    return {
+        "authenticated": False,
+        "profile": None,
+        "recent": [],
+    }
+
 # ---------------------------
 # Game rules (Vowely)
 # ---------------------------
