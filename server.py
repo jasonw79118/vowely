@@ -4,7 +4,8 @@ import asyncio
 import json
 import random
 import re
-import sqlite3
+import psycopg
+from psycopg.rows import dict_row
 import time
 import uuid
 import os
@@ -209,21 +210,99 @@ def pick_consonants() -> Set[str]:
     return set(random.sample(ALL_CONSONANTS, k))
 
 
+
 def pick_bot_name() -> str:
     return random.choice(BOT_FIRST_NAMES)
 
+_VALID_WORD_SCAN_CACHE: list[str] | None = None
+
+def enumerate_valid_words(consonants: Set[str]) -> list[str]:
+    global _VALID_WORD_SCAN_CACHE
+    try:
+        from wordfreq import top_n_list
+    except Exception:
+        return []
+    if _VALID_WORD_SCAN_CACHE is None:
+        try:
+            words = top_n_list("en", 50000)
+        except Exception:
+            words = []
+        filtered = []
+        for w in words:
+            w = (w or "").strip().lower()
+            if len(w) < MIN_WORD or len(w) > MAX_WORD or not WORD_RE.fullmatch(w):
+                continue
+            filtered.append(w)
+        _VALID_WORD_SCAN_CACHE = filtered
+    allowed = set(consonants) | ALLOWED_NON_CONSONANTS
+    out = []
+    for w in _VALID_WORD_SCAN_CACHE:
+        letters = set(w)
+        if letters.issubset(allowed) and any(ch in consonants for ch in letters):
+            out.append(w)
+    out.sort(key=lambda x: (-len(x), x))
+    return out
+
+def get_missed_words_for_match(m: "Match", side: str, limit: int = 25) -> list[str]:
+    found = m.a_words if side == "a" else m.b_words
+    valid = enumerate_valid_words(set(m.consonants))
+    return [w for w in valid if w not in found][:limit]
+
+
 
 # ---------------------------
-# Persistence (SQLite)
+# Persistence (PostgreSQL)
 # ---------------------------
-DB_PATH = "vowely.db"
+DATABASE_URL = (os.getenv("DATABASE_URL", "") or "").strip()
+COOKIE_SECURE = (os.getenv("COOKIE_SECURE", "1") or "1").strip().lower() not in {"0", "false", "no"}
+COOKIE_SAMESITE = "none" if COOKIE_SECURE else "lax"
 
+def _adapt_sql(sql: str) -> str:
+    return sql.replace("?", "%s")
 
-def db_connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+class DBCursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
 
+    def execute(self, sql: str, params=None):
+        self._cursor.execute(_adapt_sql(sql), params or ())
+        return self
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+    def close(self):
+        try:
+            self._cursor.close()
+        except Exception:
+            pass
+
+class DBConnection:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def cursor(self):
+        return DBCursor(self._conn.cursor())
+
+    def execute(self, sql: str, params=None):
+        cur = self.cursor()
+        cur.execute(sql, params)
+        return cur
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+def db_connect() -> DBConnection:
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL environment variable is required.")
+    conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    return DBConnection(conn)
 
 DB = db_connect()
 
@@ -232,7 +311,7 @@ def _now_ts() -> float:
     return time.time()
 
 
-def _safe_row_get(row: sqlite3.Row, key: str, default=None):
+def _safe_row_get(row: dict, key: str, default=None):
     try:
         return row[key] if key in row.keys() else default
     except Exception:
@@ -264,7 +343,7 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
-def profile_payload(user: sqlite3.Row) -> dict:
+def profile_payload(user: dict) -> dict:
     return {
         "userId": str(user["user_id"]),
         "username": str(_safe_row_get(user, "username", "") or ""),
@@ -284,7 +363,7 @@ def profile_payload(user: sqlite3.Row) -> dict:
     }
 
 
-def get_user_by_email_or_username(email_or_username: str) -> Optional[sqlite3.Row]:
+def get_user_by_email_or_username(email_or_username: str) -> Optional[dict]:
     value = (email_or_username or "").strip()
     if not value:
         return None
@@ -327,7 +406,7 @@ def create_session(user_id: str, request: Optional[Request] = None) -> str:
     return sid
 
 
-def get_session(session_id: str) -> Optional[sqlite3.Row]:
+def get_session(session_id: str) -> Optional[dict]:
     if not session_id:
         return None
     cur = DB.cursor()
@@ -351,7 +430,7 @@ def destroy_session(session_id: str) -> None:
     DB.commit()
 
 
-def get_current_user_from_request(request: Request) -> Optional[sqlite3.Row]:
+def get_current_user_from_request(request: Request) -> Optional[dict]:
     sid = request.cookies.get(SESSION_COOKIE_NAME, "")
     sess = get_session(sid)
     if not sess:
@@ -365,14 +444,14 @@ def attach_session_cookie(resp: Response, session_id: str) -> None:
         session_id,
         max_age=SESSION_TTL_SECONDS,
         httponly=True,
-        samesite="lax",
-        secure=False,
+        samesite=COOKIE_SAMESITE,
+        secure=COOKIE_SECURE,
         path="/",
     )
 
 
 def clear_session_cookie(resp: Response) -> None:
-    resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    resp.delete_cookie(SESSION_COOKIE_NAME, path="/", samesite=COOKIE_SAMESITE, secure=COOKIE_SECURE)
 
 
 def valid_username(value: str) -> bool:
@@ -387,10 +466,9 @@ def guest_id_from_request(request: Request) -> str:
     return (request.headers.get("X-Guest-Player-Id", "") or "").strip()[:80]
 
 
+
 def db_init() -> None:
     cur = DB.cursor()
-
-    # Base tables (backwards compatible)
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
       user_id TEXT PRIMARY KEY,
@@ -398,14 +476,31 @@ def db_init() -> None:
       rating INTEGER NOT NULL DEFAULT 1200,
       wins INTEGER NOT NULL DEFAULT 0,
       losses INTEGER NOT NULL DEFAULT 0,
-      created_at REAL NOT NULL
+      created_at DOUBLE PRECISION NOT NULL,
+      last_delta INTEGER NOT NULL DEFAULT 0,
+      last_result TEXT NOT NULL DEFAULT '',
+      updated_at DOUBLE PRECISION NOT NULL DEFAULT 0,
+      tier TEXT NOT NULL DEFAULT 'Bronze',
+      ranked_games INTEGER NOT NULL DEFAULT 0,
+      casual_games INTEGER NOT NULL DEFAULT 0,
+      email TEXT,
+      password_hash TEXT,
+      auth_provider TEXT NOT NULL DEFAULT 'guest',
+      is_guest INTEGER NOT NULL DEFAULT 1,
+      is_verified INTEGER NOT NULL DEFAULT 0,
+      avatar_seed TEXT,
+      last_login_at DOUBLE PRECISION NOT NULL DEFAULT 0,
+      linked_guest_id TEXT,
+      username TEXT
     );
     """)
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email);")
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(username);")
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS matches (
       match_id TEXT PRIMARY KEY,
-      created_at REAL NOT NULL,
+      created_at DOUBLE PRECISION NOT NULL,
       a_user TEXT NOT NULL,
       b_user TEXT NOT NULL,
       a_name TEXT NOT NULL,
@@ -414,75 +509,81 @@ def db_init() -> None:
       b_score INTEGER NOT NULL,
       winner TEXT,
       consonants TEXT NOT NULL,
-      vs_bot INTEGER NOT NULL DEFAULT 0
+      vs_bot INTEGER NOT NULL DEFAULT 0,
+      winner_user TEXT,
+      winner_name TEXT,
+      delta_a INTEGER NOT NULL DEFAULT 0,
+      delta_b INTEGER NOT NULL DEFAULT 0,
+      is_ranked INTEGER NOT NULL DEFAULT 1,
+      ended_at DOUBLE PRECISION NOT NULL DEFAULT 0,
+      ended_reason TEXT NOT NULL DEFAULT ''
     );
     """)
 
-    # --- Migrations: add Phase 2 columns if missing (safe to run every startup) ---
-    cur.execute("PRAGMA table_info(users);")
-    user_cols = {row[1] for row in cur.fetchall()}
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS sessions (
+      session_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at DOUBLE PRECISION NOT NULL,
+      expires_at DOUBLE PRECISION NOT NULL,
+      last_seen_at DOUBLE PRECISION NOT NULL,
+      user_agent TEXT,
+      ip_address TEXT
+    );
+    """)
 
-    if "last_delta" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN last_delta INTEGER NOT NULL DEFAULT 0;")
-    if "last_result" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN last_result TEXT NOT NULL DEFAULT '';")
-    if "updated_at" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN updated_at REAL NOT NULL DEFAULT 0;")
-    if "tier" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN tier TEXT NOT NULL DEFAULT 'Bronze';")
-    if "ranked_games" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN ranked_games INTEGER NOT NULL DEFAULT 0;")
-    if "casual_games" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN casual_games INTEGER NOT NULL DEFAULT 0;")
-    if "email" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN email TEXT;")
-    if "password_hash" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN password_hash TEXT;")
-    if "auth_provider" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT 'guest';")
-    if "is_guest" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 1;")
-    if "is_verified" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN is_verified INTEGER NOT NULL DEFAULT 0;")
-    if "avatar_seed" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN avatar_seed TEXT;")
-    if "last_login_at" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN last_login_at REAL NOT NULL DEFAULT 0;")
-    if "linked_guest_id" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN linked_guest_id TEXT;")
-    if "username" not in user_cols:
-        cur.execute("ALTER TABLE users ADD COLUMN username TEXT;")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at DOUBLE PRECISION NOT NULL,
+      expires_at DOUBLE PRECISION NOT NULL,
+      used_at DOUBLE PRECISION NOT NULL DEFAULT 0
+    );
+    """)
 
-    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email);")
-    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(username);")
-    cur.execute("CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL, last_seen_at REAL NOT NULL, user_agent TEXT, ip_address TEXT);")
-    cur.execute("CREATE TABLE IF NOT EXISTS password_reset_tokens (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL, used_at REAL NOT NULL DEFAULT 0);")
-    cur.execute("CREATE TABLE IF NOT EXISTS friend_requests (request_id TEXT PRIMARY KEY, from_user_id TEXT NOT NULL, to_user_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at REAL NOT NULL, responded_at REAL NOT NULL DEFAULT 0);")
-    cur.execute("CREATE TABLE IF NOT EXISTS friends (pair_key TEXT PRIMARY KEY, user_a TEXT NOT NULL, user_b TEXT NOT NULL, created_at REAL NOT NULL);")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS friend_requests (
+      request_id TEXT PRIMARY KEY,
+      from_user_id TEXT NOT NULL,
+      to_user_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at DOUBLE PRECISION NOT NULL,
+      responded_at DOUBLE PRECISION NOT NULL DEFAULT 0
+    );
+    """)
 
-    cur.execute("PRAGMA table_info(matches);")
-    match_cols = {row[1] for row in cur.fetchall()}
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS friends (
+      pair_key TEXT PRIMARY KEY,
+      user_a TEXT NOT NULL,
+      user_b TEXT NOT NULL,
+      created_at DOUBLE PRECISION NOT NULL
+    );
+    """)
 
-    if "winner_user" not in match_cols:
-        cur.execute("ALTER TABLE matches ADD COLUMN winner_user TEXT;")
-    if "winner_name" not in match_cols:
-        cur.execute("ALTER TABLE matches ADD COLUMN winner_name TEXT;")
-    if "delta_a" not in match_cols:
-        cur.execute("ALTER TABLE matches ADD COLUMN delta_a INTEGER NOT NULL DEFAULT 0;")
-    if "delta_b" not in match_cols:
-        cur.execute("ALTER TABLE matches ADD COLUMN delta_b INTEGER NOT NULL DEFAULT 0;")
-    if "is_ranked" not in match_cols:
-        cur.execute("ALTER TABLE matches ADD COLUMN is_ranked INTEGER NOT NULL DEFAULT 1;")
-    if "ended_at" not in match_cols:
-        cur.execute("ALTER TABLE matches ADD COLUMN ended_at REAL NOT NULL DEFAULT 0;")
-    if "ended_reason" not in match_cols:
-        cur.execute("ALTER TABLE matches ADD COLUMN ended_reason TEXT NOT NULL DEFAULT '';")
-
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS ranked_async_rounds (
+      round_id TEXT PRIMARY KEY,
+      consonants TEXT NOT NULL,
+      creator_user_id TEXT NOT NULL,
+      creator_name TEXT NOT NULL,
+      creator_score INTEGER NOT NULL DEFAULT 0,
+      creator_words TEXT NOT NULL DEFAULT '[]',
+      challenger_user_id TEXT,
+      challenger_name TEXT,
+      challenger_score INTEGER NOT NULL DEFAULT 0,
+      challenger_words TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at DOUBLE PRECISION NOT NULL,
+      resolved_at DOUBLE PRECISION NOT NULL DEFAULT 0
+    );
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_ranked_async_status_created ON ranked_async_rounds(status, created_at);")
     DB.commit()
 
 
-
-def get_or_create_user(user_id: str, default_name: str) -> sqlite3.Row:
+def get_or_create_user(user_id: str, default_name: str) -> dict:
     cur = DB.cursor()
     cur.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     row = cur.fetchone()
@@ -523,7 +624,7 @@ def is_name_allowed(name: str) -> bool:
     return True
 
 
-def get_user(user_id: str) -> Optional[sqlite3.Row]:
+def get_user(user_id: str) -> Optional[dict]:
     cur = DB.cursor()
     cur.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     return cur.fetchone()
@@ -624,10 +725,28 @@ def record_match(
     ended_reason: str = "",
 ) -> None:
     DB.execute(
-        """INSERT OR REPLACE INTO matches
+        """INSERT INTO matches
            (match_id, created_at, a_user, b_user, a_name, b_name, a_score, b_score, winner, consonants, vs_bot,
             winner_user, winner_name, delta_a, delta_b, is_ranked, ended_at, ended_reason)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+           ON CONFLICT (match_id) DO UPDATE SET
+             created_at = EXCLUDED.created_at,
+             a_user = EXCLUDED.a_user,
+             b_user = EXCLUDED.b_user,
+             a_name = EXCLUDED.a_name,
+             b_name = EXCLUDED.b_name,
+             a_score = EXCLUDED.a_score,
+             b_score = EXCLUDED.b_score,
+             winner = EXCLUDED.winner,
+             consonants = EXCLUDED.consonants,
+             vs_bot = EXCLUDED.vs_bot,
+             winner_user = EXCLUDED.winner_user,
+             winner_name = EXCLUDED.winner_name,
+             delta_a = EXCLUDED.delta_a,
+             delta_b = EXCLUDED.delta_b,
+             is_ranked = EXCLUDED.is_ranked,
+             ended_at = EXCLUDED.ended_at,
+             ended_reason = EXCLUDED.ended_reason""",
         (
             m.match_id,
             time.time(),
@@ -650,6 +769,7 @@ def record_match(
         ),
     )
     DB.commit()
+
 
 
 def get_recent_matches(user_id: str, limit: int = 20) -> list[dict]:
@@ -732,8 +852,6 @@ class Match:
     vs_bot: bool = False
     is_ranked: bool = True
     ended_reason: str = ""
-    async_round_id: str = ""
-    async_role: str = ""
 
 
 # ---------------------------
@@ -850,136 +968,6 @@ class Hub:
             return None
 
 hub = Hub()
-
-
-def get_open_ranked_async_round(exclude_user_id: str = "") -> Optional[dict]:
-    cur = DB.cursor()
-    if exclude_user_id:
-        cur.execute(
-            "SELECT * FROM ranked_async_rounds WHERE status = ? AND creator_user_id != ? ORDER BY created_at ASC LIMIT 1",
-            ("open", exclude_user_id),
-        )
-    else:
-        cur.execute(
-            "SELECT * FROM ranked_async_rounds WHERE status = ? ORDER BY created_at ASC LIMIT 1",
-            ("open",),
-        )
-    return cur.fetchone()
-
-
-def create_ranked_async_round(user_id: str, name: str, consonants: Set[str]) -> str:
-    round_id = str(uuid.uuid4())
-    DB.execute(
-        "INSERT INTO ranked_async_rounds (round_id, consonants, creator_user_id, creator_name, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (round_id, ",".join(sorted(consonants)), user_id, name, "open", time.time()),
-    )
-    DB.commit()
-    return round_id
-
-
-def save_ranked_async_creator(round_id: str, score: int, words: Set[str]) -> None:
-    DB.execute(
-        "UPDATE ranked_async_rounds SET creator_score = ?, creator_words = ?, status = ? WHERE round_id = ?",
-        (int(score), json.dumps(sorted(list(words))), "open", round_id),
-    )
-    DB.commit()
-
-
-def save_ranked_async_challenger(round_id: str, user_id: str, name: str, score: int, words: Set[str]) -> None:
-    DB.execute(
-        "UPDATE ranked_async_rounds SET challenger_user_id = ?, challenger_name = ?, challenger_score = ?, challenger_words = ?, status = ?, resolved_at = ? WHERE round_id = ?",
-        (user_id, name, int(score), json.dumps(sorted(list(words))), "resolved", time.time(), round_id),
-    )
-    DB.commit()
-
-
-async def start_ranked_async_match(user_id: str):
-    pc = hub.clients.get(user_id)
-    if not pc:
-        return
-    row = get_open_ranked_async_round(exclude_user_id=user_id)
-    now = time.time()
-    if row:
-        cons = set(str(row["consonants"] or "").split(","))
-        cons = {c for c in cons if c}
-        match_id = str(uuid.uuid4())
-        m = Match(
-            match_id=match_id,
-            a_user=str(row["creator_user_id"]),
-            b_user=user_id,
-            a_name=str(row["creator_name"]),
-            b_name=pc.name,
-            consonants=cons,
-            started_at=now,
-            ends_at=now + ROUND_SECONDS,
-            vs_bot=False,
-            is_ranked=True,
-            async_round_id=str(row["round_id"]),
-            async_role="challenger",
-        )
-        hub.matches[match_id] = m
-        hub.user_match[user_id] = match_id
-        pc.state = "in_match"
-        await hub.send(user_id, {
-            "type": "matchFound",
-            "matchId": match_id,
-            "youAre": "b",
-            "opponent": str(row["creator_name"]),
-            "consonants": sorted(list(cons)),
-            "endsAt": m.ends_at,
-            "roundSeconds": ROUND_SECONDS,
-            "mode": "ranked",
-            "asyncRanked": True,
-            "asyncState": "challenger",
-        })
-        await hub.send(user_id, {
-            "type": "score",
-            "matchId": match_id,
-            "a": {"name": str(row["creator_name"]), "score": 0},
-            "b": {"name": pc.name, "score": 0},
-        })
-        asyncio.create_task(end_match_at(match_id, m.ends_at))
-        return
-
-    cons = pick_consonants()
-    round_id = create_ranked_async_round(user_id, pc.name, cons)
-    match_id = str(uuid.uuid4())
-    m = Match(
-        match_id=match_id,
-        a_user=user_id,
-        b_user="pending-opponent",
-        a_name=pc.name,
-        b_name="Pending Opponent",
-        consonants=cons,
-        started_at=now,
-        ends_at=now + ROUND_SECONDS,
-        vs_bot=False,
-        is_ranked=True,
-        async_round_id=round_id,
-        async_role="creator",
-    )
-    hub.matches[match_id] = m
-    hub.user_match[user_id] = match_id
-    pc.state = "in_match"
-    await hub.send(user_id, {
-        "type": "matchFound",
-        "matchId": match_id,
-        "youAre": "a",
-        "opponent": "Pending Opponent",
-        "consonants": sorted(list(cons)),
-        "endsAt": m.ends_at,
-        "roundSeconds": ROUND_SECONDS,
-        "mode": "ranked",
-        "asyncRanked": True,
-        "asyncState": "creator",
-    })
-    await hub.send(user_id, {
-        "type": "score",
-        "matchId": match_id,
-        "a": {"name": pc.name, "score": 0},
-        "b": {"name": "Pending Opponent", "score": 0},
-    })
-    asyncio.create_task(end_match_at(match_id, m.ends_at))
 
 
 async def bot_play(match_id: str):
@@ -1156,121 +1144,6 @@ async def end_match_at(match_id: str, ends_at: float):
     a_delta = 0
     b_delta = 0
 
-    if is_ranked and getattr(m, "async_round_id", ""):
-        creator_id = m.a_user
-        challenger_id = m.b_user
-        creator_name = m.a_name
-        challenger_name = m.b_name
-        if getattr(m, "async_role", "") == "creator":
-            save_ranked_async_creator(m.async_round_id, m.a_score, m.a_words)
-            await hub.send(m.a_user, {
-                "type": "matchEnd",
-                "matchId": m.match_id,
-                "a": {"name": m.a_name, "score": m.a_score},
-                "b": {"name": "Pending Opponent", "score": 0},
-                "winner": None,
-                "mode": "ranked",
-                "asyncRanked": True,
-                "asyncState": "awaiting_opponent",
-                "pendingMessage": "Your ranked round is saved. Waiting for an opponent result.",
-            })
-            a_user = get_user(m.a_user)
-            if a_user:
-                await hub.send(m.a_user, {
-                    "type": "result",
-                    "result": "pending",
-                    "delta": 0,
-                    "rating": int(a_user["rating"]),
-                    "wins": int(a_user["wins"]),
-                    "losses": int(a_user["losses"]),
-                    "tier": str(a_user["tier"]) if "tier" in a_user.keys() else tier_for_rating(int(a_user["rating"])),
-                    "ranked": True,
-                    "opponent": "Pending Opponent",
-                    "score_for": m.a_score,
-                    "score_against": 0,
-                    "recent": get_recent_matches(m.a_user, limit=20),
-                })
-            pc = hub.clients.get(m.a_user)
-            if pc and pc.state == "in_match":
-                pc.state = "idle"
-            hub.user_match.pop(m.a_user, None)
-            await asyncio.sleep(60)
-            hub.matches.pop(match_id, None)
-            return
-        else:
-            save_ranked_async_challenger(m.async_round_id, m.b_user, m.b_name, m.b_score, m.b_words)
-            creator_score = 0
-            cur = DB.cursor()
-            cur.execute("SELECT creator_score, creator_words FROM ranked_async_rounds WHERE round_id = ? LIMIT 1", (m.async_round_id,))
-            row = cur.fetchone()
-            if row:
-                creator_score = int(row["creator_score"] or 0)
-                try:
-                    m.a_words = set(json.loads(row.get("creator_words") or "[]"))
-                except Exception:
-                    m.a_words = set()
-            m.a_score = creator_score
-            if m.a_score > m.b_score:
-                winner_text = creator_name
-                winner_user = creator_id
-                winner_name = creator_name
-            elif m.b_score > m.a_score:
-                winner_text = challenger_name
-                winner_user = challenger_id
-                winner_name = challenger_name
-            else:
-                winner_text = None
-                winner_user = None
-                winner_name = None
-            a_delta, b_delta = apply_match_result(creator_id, challenger_id, m.a_score, m.b_score, is_ranked=True)
-            record_match(
-                m,
-                winner_text=winner_text,
-                winner_user=winner_user,
-                winner_name=winner_name,
-                vs_bot=False,
-                delta_a=a_delta,
-                delta_b=b_delta,
-                is_ranked=1,
-                ended_at=time.time(),
-                ended_reason="async_ranked",
-            )
-            await hub.send(m.b_user, {
-                "type": "matchEnd",
-                "matchId": m.match_id,
-                "a": {"name": creator_name, "score": m.a_score},
-                "b": {"name": challenger_name, "score": m.b_score},
-                "winner": winner_text,
-                "ratingDelta": {"a": a_delta, "b": b_delta},
-                "mode": "ranked",
-                "asyncRanked": True,
-                "asyncState": "resolved",
-                "endedReason": "async_ranked",
-            })
-            b_user = get_user(m.b_user)
-            if b_user:
-                await hub.send(m.b_user, {
-                    "type": "result",
-                    "result": ("win" if winner_user == m.b_user else ("loss" if winner_user else "draw")),
-                    "delta": int(b_delta),
-                    "rating": int(b_user["rating"]),
-                    "wins": int(b_user["wins"]),
-                    "losses": int(b_user["losses"]),
-                    "tier": str(b_user["tier"]) if "tier" in b_user.keys() else tier_for_rating(int(b_user["rating"])),
-                    "ranked": True,
-                    "opponent": creator_name,
-                    "score_for": m.b_score,
-                    "score_against": m.a_score,
-                    "recent": get_recent_matches(m.b_user, limit=20),
-                })
-            pc = hub.clients.get(m.b_user)
-            if pc and pc.state == "in_match":
-                pc.state = "idle"
-            hub.user_match.pop(m.b_user, None)
-            await asyncio.sleep(60)
-            hub.matches.pop(match_id, None)
-            return
-
     # Elo + W/L only for human-vs-human
     if (not vs_bot) and is_ranked:
         a_delta, b_delta = apply_match_result(m.a_user, m.b_user, m.a_score, m.b_score, is_ranked=True)
@@ -1300,6 +1173,8 @@ async def end_match_at(match_id: str, ends_at: float):
         "winner": winner_text,
         "ratingDelta": {"a": a_delta, "b": b_delta},
         "mode": "ranked" if is_ranked else "casual",
+        "missedWordsA": get_missed_words_for_match(m, "a"),
+        "missedWordsB": get_missed_words_for_match(m, "b"),
     }
     await hub.send(m.a_user, payload)
     if not vs_bot:
@@ -1610,6 +1485,7 @@ async def websocket_endpoint(ws: WebSocket):
                 mode = (msg.get("mode") or "casual").strip().lower()
                 is_ranked = (mode == "ranked")
                 if is_ranked:
+                    pc.state = "in_match"
                     await hub.send(user_id, {"type": "searching", "mode": "ranked", "asyncRanked": True})
                     await start_ranked_async_match(user_id)
                 else:

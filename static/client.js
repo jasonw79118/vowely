@@ -75,21 +75,18 @@ function appendLetter(ch) {
   const w = el("word");
   if (!w) return;
   w.value = (w.value || "") + String(ch || "").toUpperCase();
-  w.focus();
 }
 
 function backspaceWord() {
   const w = el("word");
   if (!w) return;
   w.value = (w.value || "").slice(0, -1);
-  w.focus();
 }
 
 function clearWord() {
   const w = el("word");
   if (!w) return;
   w.value = "";
-  w.focus();
 }
 
 function makeTileButton(letter, cls) {
@@ -486,14 +483,13 @@ async function connect() {
 
     if (msg.type === "searching") {
       const mode = msg.mode || playMode;
-      const asyncRanked = !!msg.asyncRanked;
-      setStatus(mode === "ranked" ? (asyncRanked ? "STARTING RANKED…" : "SEARCHING (RANKED)…") : "SEARCHING (CASUAL)…");
+      setStatus(mode === "ranked" ? "STARTING RANKED…" : "SEARCHING (CASUAL)…");
       el("play").disabled = true;
-      el("cancel").disabled = mode === "ranked";
-      setMatchPill(mode === "ranked" ? (asyncRanked ? "Ranked Challenge" : "Searching") : "Searching");
-      if (mode === "ranked" && asyncRanked) logFeed("Starting ranked challenge...");
+      el("cancel").disabled = false;
+      setMatchPill("Searching");
       return;
     }
+
 
     if (msg.type === "idle") {
       setStatus("READY");
@@ -526,15 +522,14 @@ async function connect() {
       setStatus("IN MATCH");
       const mMode = msg.mode || playMode;
       const band = (msg.band !== undefined && msg.band !== null) ? `±${msg.band}` : "";
-      const asyncLabel = msg.asyncRanked ? " Async" : "";
-      setMatchPill((mMode === "ranked" ? ("Ranked" + asyncLabel) : "Casual") + " " + matchId.slice(0, 8) + (band ? (" " + band) : ""));
+      setMatchPill((mMode === "ranked" ? "Ranked" : "Casual") + " " + matchId.slice(0, 8) + (band ? (" " + band) : ""));
       setText("opponent", msg.opponent || "Opponent");
       const consonants = (msg.consonants || []).join(" ").toUpperCase();
       setText("cons", consonants || "—");
       renderTileTrays(consonants);
       const mywords = el("mywords");
       if (mywords) mywords.innerHTML = "";
-      logFeed(msg.asyncRanked ? `Ranked challenge ready vs ${msg.opponent}. Go!` : `Match found vs ${msg.opponent}. Go!`);
+      logFeed(`Match found vs ${msg.opponent}. Go!`);
       el("cancel").disabled = true;
       el("play").disabled = true;
       if (youAre === "a") {
@@ -591,12 +586,17 @@ async function connect() {
     }
 
     if (msg.type === "matchEnd") {
-      if (msg.asyncRanked && msg.asyncState === "awaiting_opponent") {
-        logFeed(msg.pendingMessage || "Your ranked round is saved. Waiting for an opponent result.");
-      } else {
-        const result = msg.winner ? `Winner: ${msg.winner}` : "Tie!";
-        const reason = msg.endedReason ? ` (${msg.endedReason})` : "";
-        logFeed(`Match ended. ${result}${reason}`);
+      const result = msg.winner ? `Winner: ${msg.winner}` : "Tie!";
+      const reason = msg.endedReason ? ` (${msg.endedReason})` : "";
+      logFeed(`Match ended. ${result}${reason}`);
+      const missed = Array.isArray(msg.missedWords)
+        ? msg.missedWords
+        : (youAre === "a" ? (msg.missedWordsA || []) : (msg.missedWordsB || []));
+      if (Array.isArray(missed) && missed.length) {
+        logFeed(`Words you missed: ${missed.join(", ")}`);
+      }
+      if (msg.pendingMessage) {
+        logFeed(msg.pendingMessage);
       }
       setStatus("READY");
       resetUIForIdle();
@@ -621,7 +621,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     el("word").value = "";
     send("submit", { word: w });
   };
-  el("word").addEventListener("keydown", (e) => { if (e.key === "Enter") el("submit").click(); });
+  el("word").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); el("submit").click(); } });
   el("playAgain").addEventListener("click", () => send("play", { mode: playMode }));
   el("refreshLeaderboard").addEventListener("click", refreshLeaderboard);
   if (!leaderboardTimer) leaderboardTimer = setInterval(refreshLeaderboard, 15000);
