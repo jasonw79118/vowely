@@ -1,3 +1,5 @@
+const CLIENT_BUILD = window.__VOWELY_BUILD__ || "2026-03-06-3";
+
 function getPlayerId() {
   let pid = localStorage.getItem("vowely_player_id");
   if (!pid) {
@@ -7,17 +9,13 @@ function getPlayerId() {
   return pid;
 }
 
-
 function getApiBase() {
-  // If the UI is hosted on GitHub Pages, talk to the Render backend.
   if (location.hostname.endsWith("github.io")) return "https://vowely.onrender.com";
   return "";
 }
 
 function getWsBase() {
-  // Use wss on https to avoid mixed-content blocks.
   const proto = (location.protocol === "https:") ? "wss" : "ws";
-  // If hosted on GitHub Pages, point to the backend host.
   if (location.hostname.endsWith("github.io")) return `${proto}://vowely.onrender.com`;
   return `${proto}://${location.host}`;
 }
@@ -64,25 +62,25 @@ function makeTileButton(letter, cls) {
 }
 
 function renderTileTrays(consonantsStr) {
-  // Vowels are always allowed (including Y) for mobile-friendly play.
-  const vowels = ["A","E","I","O","U","Y"];
+  const vowels = ["A", "E", "I", "O", "U", "Y"];
   const vowelWrap = el("vowelTiles");
   if (vowelWrap) {
     vowelWrap.innerHTML = "";
-    vowels.forEach(v => vowelWrap.appendChild(makeTileButton(v, "vowel")));
+    vowels.forEach((v) => vowelWrap.appendChild(makeTileButton(v, "vowel")));
   }
 
-  // Consonants come from the rotating set the server provides.
   const consonantWrap = el("consonantTiles");
   if (consonantWrap) {
     consonantWrap.innerHTML = "";
-    const letters = String(consonantsStr || "").toUpperCase().replace(/[^A-Z]/g, "").split("");
-    letters.forEach(c => consonantWrap.appendChild(makeTileButton(c, "consonant")));
+    const letters = String(consonantsStr || "")
+      .toUpperCase()
+      .replace(/[^A-Z]/g, "")
+      .split("")
+      .filter(Boolean);
+
+    letters.forEach((c) => consonantWrap.appendChild(makeTileButton(c, "consonant")));
   }
 }
-
-
-
 
 function setText(id, txt) {
   const node = el(id);
@@ -93,7 +91,10 @@ function setText(id, txt) {
 function setDeltaText(id, delta) {
   const node = el(id);
   if (!node) return;
-  if (delta === undefined || delta === null) { node.textContent = ""; return; }
+  if (delta === undefined || delta === null) {
+    node.textContent = "";
+    return;
+  }
   const n = Number(delta) || 0;
   const sign = n > 0 ? "+" : "";
   node.textContent = `(${sign}${n})`;
@@ -144,10 +145,10 @@ function renderRecent(list) {
     row.style.display = "flex";
     row.style.justifyContent = "space-between";
     row.style.gap = "10px";
-    row.style.padding = "6px 8px";
-    row.style.border = "1px solid #eee";
-    row.style.borderRadius = "10px";
-    row.style.background = "#fafafa";
+    row.style.padding = "8px 10px";
+    row.style.border = "1px solid #e5ecf4";
+    row.style.borderRadius = "12px";
+    row.style.background = "#ffffff";
 
     const left = document.createElement("div");
     left.style.display = "flex";
@@ -159,11 +160,7 @@ function renderRecent(list) {
 
     const mid = document.createElement("div");
     mid.className = "muted";
-    if (scoreFor !== "" && scoreAgainst !== "") {
-      mid.textContent = `Score: ${scoreFor}-${scoreAgainst}`;
-    } else {
-      mid.textContent = "";
-    }
+    mid.textContent = (scoreFor !== "" && scoreAgainst !== "") ? `Score: ${scoreFor}-${scoreAgainst}` : "";
 
     const bot = document.createElement("div");
     bot.className = "muted";
@@ -187,26 +184,30 @@ function renderRecent(list) {
   });
 }
 
-
 async function refreshLeaderboard() {
   const box = el("leaderboardList");
   if (!box) return;
   try {
-    const res = await fetch(`${getApiBase()}/api/leaderboard?limit=25`, { cache: "no-store" });
+    const res = await fetch(`${getApiBase()}/api/leaderboard?limit=25&_=${encodeURIComponent(CLIENT_BUILD)}`, {
+      cache: "no-store"
+    });
     const data = await res.json();
     const items = (data && data.items) ? data.items : [];
     box.innerHTML = "";
+
     items.forEach((p) => {
       const row = document.createElement("div");
       row.style.display = "flex";
       row.style.justifyContent = "space-between";
       row.style.gap = "10px";
-      row.style.padding = "6px 8px";
-      row.style.borderBottom = "1px solid #eee";
-      row.innerHTML = `<div><strong>#${p.rank}</strong> ${p.name} <span class="muted">(${p.tier})</span></div>` +
-                      `<div><strong>${p.rating}</strong> <span class="muted">${p.wins}-${p.losses}</span></div>`;
+      row.style.padding = "8px 10px";
+      row.style.borderBottom = "1px solid #e5ecf4";
+      row.innerHTML =
+        `<div><strong>#${p.rank}</strong> ${p.name} <span class="muted">(${p.tier})</span></div>` +
+        `<div><strong>${p.rating}</strong> <span class="muted">${p.wins}-${p.losses}</span></div>`;
       box.appendChild(row);
     });
+
     if (items.length === 0) {
       const row = document.createElement("div");
       row.className = "muted";
@@ -218,6 +219,7 @@ async function refreshLeaderboard() {
 
 function logFeed(text) {
   const box = el("feed");
+  if (!box) return;
   const div = document.createElement("div");
   div.textContent = text;
   box.appendChild(div);
@@ -226,6 +228,7 @@ function logFeed(text) {
 
 function logMyWord(text) {
   const box = el("mywords");
+  if (!box) return;
   const div = document.createElement("div");
   div.textContent = text;
   box.appendChild(div);
@@ -233,47 +236,49 @@ function logMyWord(text) {
 }
 
 function setStatus(s) {
-  el("status").textContent = s;
+  const node = el("status");
+  if (node) node.textContent = s;
 }
 
 function setMatchPill(text) {
   const pill = el("matchPill");
+  if (!pill) return;
   if (!text) {
     pill.style.display = "none";
     pill.textContent = "";
   } else {
-    pill.style.display = "inline-block";
+    pill.style.display = "inline-flex";
     pill.textContent = text;
   }
 }
 
-
 async function syncConfig() {
   try {
-    const r = await fetch(`${getApiBase()}/api/config`, { cache: "no-store" });
+    const r = await fetch(`${getApiBase()}/api/config?_=${encodeURIComponent(CLIENT_BUILD)}`, {
+      cache: "no-store"
+    });
     if (!r.ok) return;
     const j = await r.json();
     if (j && typeof j.roundSeconds === "number" && j.roundSeconds > 0) {
       roundSeconds = j.roundSeconds;
     }
-      } catch (e) {
-    // keep default
-  }
+  } catch (e) {}
 }
 
-// fetch config early
-syncConfig();
-
 function tick() {
+  const timerNode = el("timer");
+  if (!timerNode) return;
   if (!endsAt) {
-    el("timer").textContent = "—";
+    timerNode.textContent = "—";
     return;
   }
+
   const left = Math.max(0, Math.floor(endsAt - Date.now() / 1000));
   const mm = String(Math.floor(left / 60)).padStart(2, "0");
   const ss = String(left % 60).padStart(2, "0");
-  el("timer").textContent = `${mm}:${ss}`;
+  timerNode.textContent = `${mm}:${ss}`;
 }
+
 setInterval(tick, 200);
 
 function send(type, payload = {}) {
@@ -287,24 +292,29 @@ function resetUIForIdle() {
   youAre = null;
   endsAt = 0;
 
-  el("opponent").textContent = "—";
-  el("cons").textContent = "—";
-  el("feedback").textContent = "";
-  el("mywords").innerHTML = "";
+  setText("opponent", "—");
+  setText("cons", "—");
+  setText("feedback", "");
+  const mywords = el("mywords");
+  if (mywords) mywords.innerHTML = "";
   setMatchPill(null);
+  renderTileTrays("");
 
-  el("play").disabled = false;
-  el("cancel").disabled = true;
+  const playBtn = el("play");
+  const cancelBtn = el("cancel");
+  if (playBtn) playBtn.disabled = false;
+  if (cancelBtn) cancelBtn.disabled = true;
 }
 
-function connect() {
+async function connect() {
+  await syncConfig();
+
   const pid = encodeURIComponent(getPlayerId());
-  const proto = (location.protocol === "https:") ? "wss" : "ws";
-  ws = new WebSocket(`${getWsBase()}/ws?pid=${pid}`);
+  ws = new WebSocket(`${getWsBase()}/ws?pid=${pid}&build=${encodeURIComponent(CLIENT_BUILD)}`);
 
   ws.onopen = () => {
     setStatus("CONNECTED");
-    logFeed("Connected.");
+    logFeed(`Connected (${CLIENT_BUILD}).`);
     refreshLeaderboard();
   };
 
@@ -312,15 +322,17 @@ function connect() {
     setStatus("DISCONNECTED");
     logFeed("Disconnected.");
     resetUIForIdle();
+    setTimeout(connect, 1500);
   };
 
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
 
     if (msg.type === "hello") {
-      el("name").value = msg.name || "";
+      const nameInput = el("name");
+      if (nameInput) nameInput.value = msg.name || "";
       setStatus("READY");
-      // Phase 2 profile + recent
+
       const profile = msg.profile || {
         rating: msg.rating,
         wins: msg.wins,
@@ -328,11 +340,13 @@ function connect() {
         last_delta: msg.last_delta,
         last_result: msg.last_result
       };
+
       applyProfileUI(profile, msg.pid || getPlayerId());
       if (profile.ranked_games !== undefined) setText("rankedGamesValue", profile.ranked_games);
       if (profile.casual_games !== undefined) setText("casualGamesValue", profile.casual_games);
 
       renderRecent(msg.recent || []);
+      renderTileTrays("");
       return;
     }
 
@@ -344,8 +358,10 @@ function connect() {
     if (msg.type === "searching") {
       const mode = msg.mode || playMode;
       setStatus(mode === "ranked" ? "SEARCHING (RANKED)…" : "SEARCHING (CASUAL)…");
-      el("play").disabled = true;
-      el("cancel").disabled = false;
+      const playBtn = el("play");
+      const cancelBtn = el("cancel");
+      if (playBtn) playBtn.disabled = true;
+      if (cancelBtn) cancelBtn.disabled = false;
       setMatchPill("Searching");
       return;
     }
@@ -365,67 +381,82 @@ function connect() {
       inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      endsAt = (msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + Number(roundSeconds || 120)));
-      // (server also sends msg.endsAt; we prefer local countdown to avoid 4:00 display drift)
+      const localRound = Number(roundSeconds || 120);
+      endsAt = msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + localRound);
+
       setStatus("IN MATCH");
       setMatchPill("Reconnected " + matchId.slice(0, 8));
-      el("opponent").textContent = msg.opponent || "Opponent";
-      el("cons").textContent = (msg.consonants || []).join(" ").toUpperCase();
+      setText("opponent", msg.opponent || "Opponent");
+
+      const consonants = (msg.consonants || []).join(" ").toUpperCase();
+      setText("cons", consonants || "—");
+      renderTileTrays(consonants);
+
       logFeed("Reconnected to match.");
-      el("cancel").disabled = true;
-      el("play").disabled = true;
+
+      const cancelBtn = el("cancel");
+      const playBtn = el("play");
+      if (cancelBtn) cancelBtn.disabled = true;
+      if (playBtn) playBtn.disabled = true;
       return;
     }
 
     if (msg.type === "matchFound") {
-      
-      if (msg.roundSeconds) roundSeconds = Number(msg.roundSeconds);
-inMatch = true;
+      roundSeconds = msg.roundSeconds ? Number(msg.roundSeconds) : 120;
+      inMatch = true;
       matchId = msg.matchId;
       youAre = msg.youAre;
-      endsAt = (msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + Number(roundSeconds || 120)));
+
+      const localRound = Number(roundSeconds || 120);
+      endsAt = msg.endsAt ? Number(msg.endsAt) : ((Date.now() / 1000) + localRound);
 
       setStatus("IN MATCH");
       const mMode = msg.mode || playMode;
       const band = (msg.band !== undefined && msg.band !== null) ? `±${msg.band}` : "";
       setMatchPill((mMode === "ranked" ? "Ranked" : "Casual") + " " + matchId.slice(0, 8) + (band ? (" " + band) : ""));
 
-      el("opponent").textContent = msg.opponent || "Opponent";
-      el("cons").textContent = (msg.consonants || []).join(" ").toUpperCase();
+      setText("opponent", msg.opponent || "Opponent");
 
-      el("mywords").innerHTML = "";
+      const consonants = (msg.consonants || []).join(" ").toUpperCase();
+      setText("cons", consonants || "—");
+      renderTileTrays(consonants);
+
+      const mywords = el("mywords");
+      if (mywords) mywords.innerHTML = "";
       logFeed(`Match found vs ${msg.opponent}. Go!`);
-      el("cancel").disabled = true;
-      el("play").disabled = true;
 
-      // Initialize score labels
+      const cancelBtn = el("cancel");
+      const playBtn = el("play");
+      if (cancelBtn) cancelBtn.disabled = true;
+      if (playBtn) playBtn.disabled = true;
+
+      const nameInput = el("name");
       if (youAre === "a") {
-        el("aName").textContent = el("name").value || "You";
-        el("bName").textContent = msg.opponent || "Opponent";
+        setText("aName", (nameInput && nameInput.value) || "You");
+        setText("bName", msg.opponent || "Opponent");
       } else {
-        el("aName").textContent = msg.opponent || "Opponent";
-        el("bName").textContent = el("name").value || "You";
+        setText("aName", msg.opponent || "Opponent");
+        setText("bName", (nameInput && nameInput.value) || "You");
       }
       return;
     }
 
     if (msg.type === "score") {
-      // msg.a and msg.b are fixed "a" and "b" sides
-      el("aName").textContent = msg.a.name;
-      el("bName").textContent = msg.b.name;
-      el("aScore").textContent = msg.a.score;
-      el("bScore").textContent = msg.b.score;
+      setText("aName", msg.a.name);
+      setText("bName", msg.b.name);
+      setText("aScore", msg.a.score);
+      setText("bScore", msg.b.score);
       return;
     }
 
     if (msg.type === "accept") {
-      el("feedback").textContent = `Accepted (+${msg.points})`;
+      setText("feedback", `Accepted (+${msg.points})`);
       logMyWord(`${msg.word} (+${msg.points})`);
       return;
     }
 
     if (msg.type === "reject") {
-      el("feedback").textContent = `Nope: ${msg.reason}`;
+      setText("feedback", `Nope: ${msg.reason}`);
       return;
     }
 
@@ -435,7 +466,6 @@ inMatch = true;
     }
 
     if (msg.type === "result") {
-      // Phase 2 authoritative profile update after match
       setText("ratingValue", msg.rating);
       setText("winsValue", msg.wins);
       setText("lossesValue", msg.losses);
@@ -447,73 +477,105 @@ inMatch = true;
     }
 
     if (msg.type === "matchEnd") {
-      // Reset match state so Play works without refresh
-      const a = msg.a, b = msg.b;
-      let result = "Tie!";
-      if (msg.winner) result = `Winner: ${msg.winner}`;
+      const result = msg.winner ? `Winner: ${msg.winner}` : "Tie!";
       const reason = msg.endedReason ? ` (${msg.endedReason})` : "";
       logFeed(`Match ended. ${result}${reason}`);
-
-      // Fully reset match state so Play works without refresh
       setStatus("READY");
       resetUIForIdle();
-      el("play").disabled = false;
-      setMatchPill(null);
-      return;
+      const playBtn = el("play");
+      if (playBtn) playBtn.disabled = false;
     }
   };
 }
 
-el("setName").onclick = () => send("setName", { name: el("name").value });
-el("play").onclick = () => send("play", { mode: playMode });
-el("cancel").onclick = () => send("cancelSearch");
+const setNameBtn = el("setName");
+if (setNameBtn) {
+  setNameBtn.onclick = () => send("setName", { name: el("name").value });
+}
 
-el("submit").onclick = () => {
-  const w = el("word").value.trim();
-  if (!w) return;
-  el("word").value = "";
-  send("submit", { word: w });
-};
+const playBtn = el("play");
+if (playBtn) {
+  playBtn.onclick = () => send("play", { mode: playMode });
+}
 
-el("word").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") el("submit").click();
-});
+const cancelBtn = el("cancel");
+if (cancelBtn) {
+  cancelBtn.onclick = () => send("cancelSearch");
+}
+
+const submitBtn = el("submit");
+if (submitBtn) {
+  submitBtn.onclick = () => {
+    const wordInput = el("word");
+    const w = wordInput ? wordInput.value.trim() : "";
+    if (!w) return;
+    if (wordInput) wordInput.value = "";
+    send("submit", { word: w });
+  };
+}
+
+const wordInput = el("word");
+if (wordInput) {
+  wordInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && submitBtn) {
+      submitBtn.click();
+    }
+  });
+}
 
 document.querySelectorAll(".cheer").forEach((btn) => {
   btn.addEventListener("click", () => {
-    const token = btn.getAttribute("data-token");
-    send("cheer", { token });
+    send("cheer", { token: btn.getAttribute("data-token") });
   });
 });
-
 
 window.addEventListener("DOMContentLoaded", () => {
   const modeSel = el("modeSelect");
   if (modeSel) {
     playMode = (modeSel.value || "casual");
-    modeSel.addEventListener("change", () => { playMode = (modeSel.value || "casual"); });
+    modeSel.addEventListener("change", () => {
+      playMode = (modeSel.value || "casual");
+    });
   }
+
   const againBtn = el("playAgain");
-  if (againBtn) againBtn.addEventListener("click", () => send("play", { mode: playMode }));
+  if (againBtn) {
+    againBtn.addEventListener("click", () => send("play", { mode: playMode }));
+  }
+
   const refreshBtn = el("refreshLeaderboard");
-  if (refreshBtn) refreshBtn.addEventListener("click", refreshLeaderboard);
-  if (!leaderboardTimer) leaderboardTimer = setInterval(refreshLeaderboard, 15000);
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", refreshLeaderboard);
+  }
+
+  if (!leaderboardTimer) {
+    leaderboardTimer = setInterval(refreshLeaderboard, 15000);
+  }
+
+  const backBtn = el("backspaceWord");
+  if (backBtn) {
+    backBtn.addEventListener("click", backspaceWord);
+  }
+
+  const clearBtn = el("clearWord");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", clearWord);
+  }
 
   const btn = el("toggleRecentBtn");
   const list = el("recentList");
   const empty = el("recentEmpty");
-  if (!btn || !list || !empty) return;
+  if (btn && list && empty) {
+    let shown = true;
+    btn.addEventListener("click", () => {
+      shown = !shown;
+      list.style.display = shown ? "flex" : "none";
+      empty.style.display = shown ? empty.style.display : "none";
+      btn.textContent = shown ? "Hide" : "Show";
+    });
+  }
 
-  let shown = true;
-  btn.addEventListener("click", () => {
-    shown = !shown;
-    list.style.display = shown ? "flex" : "none";
-    empty.style.display = shown ? empty.style.display : "none";
-    btn.textContent = shown ? "Hide" : "Show";
-  });
+  renderTileTrays("");
 });
 
-
 connect();
-
-document.addEventListener('DOMContentLoaded', () => { renderTileTrays(document.getElementById('letters')?.textContent || ''); });

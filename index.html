@@ -2,16 +2,276 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+  <meta http-equiv="Pragma" content="no-cache"/>
+  <meta http-equiv="Expires" content="0"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Vowely</title>
 
-  <!-- Correct favicon paths for GitHub Pages project site -->
   <link rel="icon" href="/vowely/favicon.ico">
   <link rel="shortcut icon" href="/vowely/favicon.ico">
   <link rel="apple-touch-icon" href="/vowely/apple-touch-icon.png">
 
-  <!-- Single CSS load with cache busting -->
-  <link rel="stylesheet" href="style.css?v=2026-03-05-2"/>
+  <link rel="stylesheet" href="style.css?v=2026-03-06-3"/>
+
+  <style>
+    :root {
+      --bg1: #0f172a;
+      --bg2: #1e293b;
+      --panel: rgba(255, 255, 255, 0.96);
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #f97316;
+      --accent2: #fb923c;
+      --shadow: 0 18px 45px rgba(15, 23, 42, 0.16);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(249, 115, 22, 0.22), transparent 28%),
+        linear-gradient(135deg, var(--bg1), var(--bg2));
+      min-height: 100vh;
+    }
+
+    main {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 24px 18px 40px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 18px 20px;
+      background: rgba(15, 23, 42, 0.84);
+      backdrop-filter: blur(10px);
+      color: #fff;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+    }
+
+    .brand-title {
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    h1 {
+      margin: 8px 0 18px;
+      color: #fff;
+      font-size: 2.1rem;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(340px, 0.9fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid rgba(219, 228, 240, 0.9);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .muted { color: var(--muted); }
+
+    .big {
+      font-size: 2rem;
+      font-weight: 800;
+    }
+
+    #timer {
+      color: var(--accent);
+      font-size: 2.6rem;
+      text-shadow: 0 3px 16px rgba(249, 115, 22, 0.16);
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 36px;
+      padding: 0 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+      font-weight: 700;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+    }
+
+    input, select, button {
+      font: inherit;
+    }
+
+    input, select {
+      min-height: 44px;
+      border: 1px solid #d7e0ea;
+      border-radius: 12px;
+      padding: 0 14px;
+      background: #fff;
+      color: var(--text);
+    }
+
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.12);
+    }
+
+    button {
+      min-height: 44px;
+      border: none;
+      border-radius: 12px;
+      padding: 0 16px;
+      background: linear-gradient(180deg, var(--accent), var(--accent2));
+      color: #fff;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 8px 20px rgba(249, 115, 22, 0.22);
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    hr {
+      border: none;
+      height: 1px;
+      background: #e7edf5;
+      margin: 18px 0;
+    }
+
+    .tile-trays {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin: 12px 0 10px;
+    }
+
+    .tray {
+      border: 1px solid #e5ecf4;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #f8fafc, #f2f6fb);
+      padding: 14px;
+    }
+
+    .tray-title {
+      font-weight: 800;
+      color: #334155;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 0.82rem;
+    }
+
+    .tiles-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(52px, 1fr));
+      gap: 10px;
+    }
+
+    .letter-tile {
+      min-height: 56px;
+      border-radius: 14px;
+      border: 1px solid #e2e8f0;
+      background: linear-gradient(180deg, #ffffff, #f8fafc);
+      color: #0f172a;
+      font-size: 1.2rem;
+      font-weight: 900;
+      box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+    }
+
+    .letter-tile.vowel {
+      background: linear-gradient(180deg, #fff7ed, #ffedd5);
+      border-color: #fdba74;
+    }
+
+    .letter-tile.consonant {
+      background: linear-gradient(180deg, #eff6ff, #dbeafe);
+      border-color: #93c5fd;
+    }
+
+    .word-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 10px 8px;
+      border-bottom: 1px solid #edf2f7;
+      text-align: left;
+    }
+
+    th {
+      font-size: 0.9rem;
+      color: #64748b;
+    }
+
+    #leaderboardList,
+    #feed,
+    #mywords {
+      border-radius: 14px;
+      background: #f8fafc;
+      padding: 10px;
+      min-height: 56px;
+    }
+
+    #feedback {
+      min-height: 24px;
+      padding-top: 8px;
+      font-weight: 700;
+    }
+
+    @media (max-width: 920px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .tile-trays {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
 </head>
 <body>
   <header class="topbar">
@@ -26,128 +286,129 @@
   </header>
 
   <main>
-  <h1>Vowely</h1>
+    <h1>Vowely</h1>
 
-  <div id="profileBar" class="card" style="margin-bottom:12px;">
-    <div class="row" style="justify-content:space-between; align-items:center;">
-      <div><strong>Tier:</strong> <span id="tierValue">—</span></div>
-      <div><strong>Rating:</strong> <span id="ratingValue">—</span></div>
-      <div><strong>W:</strong> <span id="winsValue">—</span> / <strong>L:</strong> <span id="lossesValue">—</span></div>
-      <div class="muted"><strong>Ranked:</strong> <span id="rankedGamesValue">0</span> • <strong>Casual:</strong> <span id="casualGamesValue">0</span></div>
-      <div><strong>Last:</strong> <span id="lastResultValue">—</span> <span id="lastDeltaValue"></span></div>
-      <div class="muted" style="margin-left:auto;"><strong>Player:</strong> <span id="playerIdValue">—</span></div>
-    </div>
-  </div>
-
-  <div id="recentWrap" class="card" style="margin-bottom:12px;">
-    <div class="row" style="justify-content:space-between; align-items:center;">
-      <strong>Recent matches</strong>
-      <button id="toggleRecentBtn" type="button">Hide</button>
-    </div>
-    <div id="recentList" style="margin-top:10px; display:flex; flex-direction:column; gap:6px;"></div>
-    <div id="recentEmpty" class="muted" style="margin-top:10px; display:none;">No matches yet.</div>
-  </div>
-
-  <div class="layout">
-
-    <div class="card">
-      <div class="row">
-        <input id="name" placeholder="Your name" />
-        <button id="setName">Set Name</button>
+    <div id="profileBar" class="card" style="margin-bottom:12px;">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <div><strong>Tier:</strong> <span id="tierValue">—</span></div>
+        <div><strong>Rating:</strong> <span id="ratingValue">—</span></div>
+        <div><strong>W:</strong> <span id="winsValue">—</span> / <strong>L:</strong> <span id="lossesValue">—</span></div>
+        <div class="muted"><strong>Ranked:</strong> <span id="rankedGamesValue">0</span> • <strong>Casual:</strong> <span id="casualGamesValue">0</span></div>
+        <div><strong>Last:</strong> <span id="lastResultValue">—</span> <span id="lastDeltaValue"></span></div>
+        <div class="muted" style="margin-left:auto;"><strong>Player:</strong> <span id="playerIdValue">—</span></div>
       </div>
+    </div>
 
-      <div class="row">
-        <select id="modeSelect">
-          <option value="casual">Casual</option>
-          <option value="ranked">Ranked</option>
-        </select>
-        <button id="play">Play</button>
-        <button id="playAgain" type="button">Play Again</button>
-        <button id="cancel" disabled>Cancel Search</button>
-        <span id="matchPill" class="pill" style="display:none;"></span>
+    <div id="recentWrap" class="card" style="margin-bottom:12px;">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <strong>Recent matches</strong>
+        <button id="toggleRecentBtn" type="button">Hide</button>
       </div>
+      <div id="recentList" style="margin-top:10px; display:flex; flex-direction:column; gap:6px;"></div>
+      <div id="recentEmpty" class="muted" style="margin-top:10px; display:none;">No matches yet.</div>
+    </div>
 
-      <hr/>
-
-      <div class="muted">Opponent</div>
-      <div id="opponent" class="big">—</div>
-
-      <div class="muted">Time left</div>
-      <div id="timer" class="big">—</div>
-
-      <div class="muted">Consonants (vowels + Y always allowed)</div>
-
-      <div class="tile-trays">
-        <div class="tray">
-          <div class="tray-title">Vowels</div>
-          <div id="vowelTiles" class="tiles-grid"></div>
+    <div class="layout">
+      <div class="card">
+        <div class="row">
+          <input id="name" placeholder="Your name" />
+          <button id="setName">Set Name</button>
         </div>
-        <div class="tray">
-          <div class="tray-title">Consonants</div>
-          <div id="consonantTiles" class="tiles-grid"></div>
+
+        <div class="row">
+          <select id="modeSelect">
+            <option value="casual">Casual</option>
+            <option value="ranked">Ranked</option>
+          </select>
+          <button id="play">Play</button>
+          <button id="playAgain" type="button">Play Again</button>
+          <button id="cancel" disabled>Cancel Search</button>
+          <span id="matchPill" class="pill" style="display:none;"></span>
+        </div>
+
+        <hr/>
+
+        <div class="muted">Opponent</div>
+        <div id="opponent" class="big">—</div>
+
+        <div class="muted">Time left</div>
+        <div id="timer" class="big">—</div>
+
+        <div class="muted">Consonants (vowels + Y always allowed)</div>
+
+        <div class="tile-trays">
+          <div class="tray">
+            <div class="tray-title">Vowels</div>
+            <div id="vowelTiles" class="tiles-grid" aria-label="Vowel tiles"></div>
+          </div>
+          <div class="tray">
+            <div class="tray-title">Consonants</div>
+            <div id="consonantTiles" class="tiles-grid" aria-label="Consonant tiles"></div>
+          </div>
+        </div>
+
+        <div id="cons" class="big">—</div>
+
+        <hr/>
+
+        <div class="muted">Submit word</div>
+        <div class="row">
+          <input id="word" placeholder="Type a word…" />
+          <div class="word-controls">
+            <button id="backspaceWord" type="button" class="btn">⌫</button>
+            <button id="clearWord" type="button" class="btn">Clear</button>
+          </div>
+          <button id="submit">Submit</button>
+        </div>
+
+        <div id="feedback" class="muted"></div>
+
+        <div class="row">
+          <button class="cheer" data-token="gg">GG</button>
+          <button class="cheer" data-token="nice">Nice</button>
+          <button class="cheer" data-token="clap">👏</button>
+          <button class="cheer" data-token="fire">🔥</button>
+          <button class="cheer" data-token="party">🎉</button>
         </div>
       </div>
 
-      <div id="cons" class="big">—</div>
-
-      <hr/>
-
-      <div class="muted">Submit word</div>
-      <div class="row">
-        <input id="word" placeholder="Type a word…" />
-        <div class="word-controls">
-          <button id="backspaceWord" type="button" class="btn">⌫</button>
-          <button id="clearWord" type="button" class="btn">Clear</button>
+      <div class="card">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+          <h3 style="margin:0;">Leaderboard</h3>
+          <button id="refreshLeaderboard" type="button">Refresh</button>
         </div>
-        <button id="submit">Submit</button>
-      </div>
 
-      <div id="feedback" class="muted"></div>
+        <div id="leaderboardList" style="margin-top:8px; max-height:220px; overflow:auto; border:1px solid #eee; border-radius:10px; background:#fafafa;"></div>
 
-      <div class="row">
-        <button class="cheer" data-token="gg">GG</button>
-        <button class="cheer" data-token="nice">Nice</button>
-        <button class="cheer" data-token="clap">👏</button>
-        <button class="cheer" data-token="fire">🔥</button>
-        <button class="cheer" data-token="party">🎉</button>
+        <hr/>
+
+        <h3>Score</h3>
+        <table>
+          <thead>
+            <tr><th>Player</th><th>Score</th></tr>
+          </thead>
+          <tbody>
+            <tr><td id="aName">—</td><td id="aScore">0</td></tr>
+            <tr><td id="bName">—</td><td id="bScore">0</td></tr>
+          </tbody>
+        </table>
+
+        <hr/>
+
+        <h3>Your accepted words</h3>
+        <div id="mywords"></div>
+
+        <hr/>
+
+        <h3>Match feed</h3>
+        <div id="feed"></div>
       </div>
     </div>
 
-    <div class="card">
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <h3 style="margin:0;">Leaderboard</h3>
-        <button id="refreshLeaderboard" type="button">Refresh</button>
-      </div>
-
-      <div id="leaderboardList" style="margin-top:8px; max-height:220px; overflow:auto; border:1px solid #eee; border-radius:10px; background:#fafafa;"></div>
-
-      <hr/>
-
-      <h3>Score</h3>
-      <table>
-        <thead><tr><th>Player</th><th>Score</th></tr></thead>
-        <tbody>
-          <tr><td id="aName">—</td><td id="aScore">0</td></tr>
-          <tr><td id="bName">—</td><td id="bScore">0</td></tr>
-        </tbody>
-      </table>
-
-      <hr/>
-
-      <h3>Your accepted words</h3>
-      <div id="mywords"></div>
-
-      <hr/>
-
-      <h3>Match feed</h3>
-      <div id="feed"></div>
-    </div>
-
-  </div>
-
-  <!-- JS cache bust version increased to kill timer caching -->
-  <script src="static/client.js?v=2026-03-05-10"></script>
-
+    <script>
+      window.__VOWELY_BUILD__ = "2026-03-06-3";
+    </script>
+    <script src="static/client.js?v=2026-03-06-3"></script>
   </main>
 </body>
 </html>
