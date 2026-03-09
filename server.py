@@ -365,14 +365,14 @@ def attach_session_cookie(resp: Response, session_id: str) -> None:
         session_id,
         max_age=SESSION_TTL_SECONDS,
         httponly=True,
-        samesite="lax",
-        secure=False,
+        samesite="none",
+        secure=True,
         path="/",
     )
 
 
 def clear_session_cookie(resp: Response) -> None:
-    resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    resp.delete_cookie(SESSION_COOKIE_NAME, path="/", samesite="none", secure=True)
 
 
 def valid_username(value: str) -> bool:
@@ -459,6 +459,23 @@ def db_init() -> None:
     cur.execute("CREATE TABLE IF NOT EXISTS password_reset_tokens (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL, used_at REAL NOT NULL DEFAULT 0);")
     cur.execute("CREATE TABLE IF NOT EXISTS friend_requests (request_id TEXT PRIMARY KEY, from_user_id TEXT NOT NULL, to_user_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at REAL NOT NULL, responded_at REAL NOT NULL DEFAULT 0);")
     cur.execute("CREATE TABLE IF NOT EXISTS friends (pair_key TEXT PRIMARY KEY, user_a TEXT NOT NULL, user_b TEXT NOT NULL, created_at REAL NOT NULL);")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS ranked_async_rounds (
+      round_id TEXT PRIMARY KEY,
+      consonants TEXT NOT NULL,
+      creator_user_id TEXT NOT NULL,
+      creator_name TEXT NOT NULL,
+      creator_score INTEGER NOT NULL DEFAULT 0,
+      creator_words TEXT NOT NULL DEFAULT '[]',
+      challenger_user_id TEXT,
+      challenger_name TEXT,
+      challenger_score INTEGER NOT NULL DEFAULT 0,
+      challenger_words TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at REAL NOT NULL,
+      resolved_at REAL NOT NULL DEFAULT 0
+    );
+    """)
 
     cur.execute("PRAGMA table_info(matches);")
     match_cols = {row[1] for row in cur.fetchall()}
@@ -1206,7 +1223,7 @@ async def end_match_at(match_id: str, ends_at: float):
             if row:
                 creator_score = int(row["creator_score"] or 0)
                 try:
-                    m.a_words = set(json.loads(row.get("creator_words") or "[]"))
+                    m.a_words = set(json.loads(_safe_row_get(row, "creator_words", "[]") or "[]"))
                 except Exception:
                     m.a_words = set()
             m.a_score = creator_score
@@ -1363,7 +1380,7 @@ def api_me(request: Request):
     pid = guest_id_from_request(request)
     if pid:
         guest = get_user(pid)
-        if guest:
+        if guest and bool(int(_safe_row_get(guest, "is_guest", 1) or 0)):
             return {"authenticated": False, "profile": profile_payload(guest), "recent": get_recent_matches(str(guest["user_id"]), limit=20)}
     return {"authenticated": False, "profile": None, "recent": []}
 
@@ -1439,6 +1456,8 @@ async def api_auth_upgrade_guest(request: Request):
     user = get_user(guest_id)
     if not user:
         return JSONResponse({"ok": False, "error": "Guest profile not found."}, status_code=404)
+    if not bool(int(_safe_row_get(user, "is_guest", 1) or 0)):
+        return JSONResponse({"ok": False, "error": "That profile is already a registered account."}, status_code=400)
 
     email = normalize_email(data.get("email", ""))
     username = normalize_username(data.get("username", ""))
@@ -1517,11 +1536,25 @@ def get_pid_from_ws(ws: WebSocket) -> str:
     return pid
 
 
+def get_authenticated_user_id_from_ws(ws: WebSocket) -> str:
+    try:
+        sid = ""
+        if hasattr(ws, "cookies") and ws.cookies:
+            sid = (ws.cookies.get(SESSION_COOKIE_NAME, "") or "").strip()
+        if sid:
+            sess = get_session(sid)
+            if sess:
+                return str(sess["user_id"])
+    except Exception:
+        pass
+    return get_pid_from_ws(ws)
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
 
-    user_id = get_pid_from_ws(ws)
+    user_id = get_authenticated_user_id_from_ws(ws)
     default_name = f"Player-{user_id[-4:]}"
     user = get_or_create_user(user_id, default_name)
 
@@ -1607,13 +1640,16 @@ async def websocket_endpoint(ws: WebSocket):
                 if pc.state == "in_match":
                     await hub.send(user_id, {"type": "reject", "reason": "Already in a match."})
                     continue
+                if pc.state == "searching":
+                    await hub.send(user_id, {"type": "reject", "reason": "Already searching."})
+                    continue
                 mode = (msg.get("mode") or "casual").strip().lower()
                 is_ranked = (mode == "ranked")
+                pc.state = "searching"
                 if is_ranked:
-                    await hub.send(user_id, {"type": "searching", "mode": "ranked", "asyncRanked": True})
-                    await start_ranked_async_match(user_id)
+                    await hub.send(user_id, {"type": "searching", "mode": "ranked", "asyncRanked": False})
+                    await hub.enqueue(user_id, is_ranked=True)
                 else:
-                    pc.state = "searching"
                     await hub.send(user_id, {"type": "searching", "mode": "casual"})
                     await hub.enqueue(user_id, is_ranked=False)
 
