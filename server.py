@@ -81,7 +81,6 @@ def tier_for_rating(rating: int) -> str:
 
 
 app = FastAPI()
-SERVER_BUILD = "2026-03-09-ranked-async-open-fix"
 
 SESSION_COOKIE_NAME = "vowely_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
@@ -135,7 +134,7 @@ def root_head():
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "build": SERVER_BUILD}
+    return {"ok": True, "build": "2026-03-09-auth-ranked-fix"}
 
 @app.head("/healthz")
 def healthz_head():
@@ -366,14 +365,14 @@ def attach_session_cookie(resp: Response, session_id: str) -> None:
         session_id,
         max_age=SESSION_TTL_SECONDS,
         httponly=True,
-        samesite="lax",
-        secure=False,
+        samesite="none",
+        secure=True,
         path="/",
     )
 
 
 def clear_session_cookie(resp: Response) -> None:
-    resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    resp.delete_cookie(SESSION_COOKIE_NAME, path="/", samesite="none", secure=True)
 
 
 def valid_username(value: str) -> bool:
@@ -1164,7 +1163,6 @@ async def end_match_at(match_id: str, ends_at: float):
         challenger_name = m.b_name
         if getattr(m, "async_role", "") == "creator":
             save_ranked_async_creator(m.async_round_id, m.a_score, m.a_words)
-            print(f"[ranked-async] creator round opened round_id={m.async_round_id} user={m.a_user} score={m.a_score}")
             await hub.send(m.a_user, {
                 "type": "matchEnd",
                 "matchId": m.match_id,
@@ -1201,7 +1199,6 @@ async def end_match_at(match_id: str, ends_at: float):
             return
         else:
             save_ranked_async_challenger(m.async_round_id, m.b_user, m.b_name, m.b_score, m.b_words)
-            print(f"[ranked-async] challenger submitted round_id={m.async_round_id} user={m.b_user} score={m.b_score}")
             creator_score = 0
             cur = DB.cursor()
             cur.execute("SELECT creator_score, creator_words FROM ranked_async_rounds WHERE round_id = ? LIMIT 1", (m.async_round_id,))
@@ -1209,7 +1206,7 @@ async def end_match_at(match_id: str, ends_at: float):
             if row:
                 creator_score = int(row["creator_score"] or 0)
                 try:
-                    m.a_words = set(json.loads(row.get("creator_words") or "[]"))
+                    m.a_words = set(json.loads(_safe_row_get(row, "creator_words", "[]") or "[]"))
                 except Exception:
                     m.a_words = set()
             m.a_score = creator_score
@@ -1366,7 +1363,7 @@ def api_me(request: Request):
     pid = guest_id_from_request(request)
     if pid:
         guest = get_user(pid)
-        if guest:
+        if guest and bool(int(_safe_row_get(guest, "is_guest", 1) or 0)):
             return {"authenticated": False, "profile": profile_payload(guest), "recent": get_recent_matches(str(guest["user_id"]), limit=20)}
     return {"authenticated": False, "profile": None, "recent": []}
 
@@ -1442,6 +1439,8 @@ async def api_auth_upgrade_guest(request: Request):
     user = get_user(guest_id)
     if not user:
         return JSONResponse({"ok": False, "error": "Guest profile not found."}, status_code=404)
+    if not bool(int(_safe_row_get(user, "is_guest", 1) or 0)):
+        return JSONResponse({"ok": False, "error": "That profile is already a registered account."}, status_code=400)
 
     email = normalize_email(data.get("email", ""))
     username = normalize_username(data.get("username", ""))
@@ -1520,11 +1519,25 @@ def get_pid_from_ws(ws: WebSocket) -> str:
     return pid
 
 
+def get_user_id_from_ws(ws: WebSocket) -> str:
+    cookie_header = ws.headers.get("cookie", "") or ""
+    cookies: Dict[str, str] = {}
+    for part in cookie_header.split(";"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            cookies[k.strip()] = v.strip()
+    sid = cookies.get(SESSION_COOKIE_NAME, "")
+    sess = get_session(sid)
+    if sess:
+        return str(sess["user_id"])
+    return get_pid_from_ws(ws)
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
 
-    user_id = get_pid_from_ws(ws)
+    user_id = get_user_id_from_ws(ws)
     default_name = f"Player-{user_id[-4:]}"
     user = get_or_create_user(user_id, default_name)
 

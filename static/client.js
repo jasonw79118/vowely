@@ -1,4 +1,4 @@
-const CLIENT_BUILD = window.__VOWELY_BUILD__ || "2026-03-06-5";
+const CLIENT_BUILD = window.__VOWELY_BUILD__ || "2026-03-09-auth-ranked-fix";
 const FORCED_ROUND_SECONDS = 120;
 
 let roundSeconds = FORCED_ROUND_SECONDS;
@@ -366,8 +366,13 @@ async function handleLogout() {
   try {
     await apiFetch("/api/auth/logout", { method: "POST" });
   } catch (_) {}
-  authState = { authenticated: false, profile: authState.profile, recent: authState.recent || [] };
+  const newGuestId = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now());
+  setPlayerId(newGuestId);
+  authState = { authenticated: false, profile: { displayName: "Guest", isGuest: true, userId: newGuestId }, recent: [] };
   updateAccountUI();
+  applyProfileUI({ rating: 1200, wins: 0, losses: 0, tier: "Bronze", rankedGames: 0, casualGames: 0, lastResult: "", lastDelta: 0 }, newGuestId);
+  renderRecent([]);
+  reconnectSocket();
   hideAuthModal();
 }
 
